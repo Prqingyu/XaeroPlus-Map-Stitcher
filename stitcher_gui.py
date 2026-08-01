@@ -51,6 +51,11 @@ APP_TITLE = "XaeroPlus Map Stitcher — 分片地图整合工具"
 PREVIEW_TARGET_BYTES = 1_000_000  # ~1 MB overview
 DEFAULT_LEVEL = 6
 
+# Heading font sizes (keep the hierarchy clear: H1 > H2 > body).
+# H1 = panel titles (数据 / 预览 / 裁切设置), H2 = sub-sections (原图区 / 输出区).
+H1_SIZE = 16
+H2_SIZE = 14
+
 # ---- layout knobs (adjust these to resize the UI) ---------------------
 # Main window default and minimum size (px). The stitched map is portrait
 # (taller than wide), so increasing WIN_H is what makes the preview bigger.
@@ -103,7 +108,7 @@ class CropWindow(ctk.CTkToplevel):
         self._on_change(None)
 
     def _build_panel(self, panel: ctk.CTkFrame) -> None:
-        ctk.CTkLabel(panel, text="裁切设置", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(10, 4))
+        ctk.CTkLabel(panel, text="裁切设置", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).pack(anchor="w", padx=12, pady=(10, 4))
 
         row = ctk.CTkFrame(panel, fg_color="transparent")
         row.pack(fill="x", padx=12)
@@ -116,7 +121,7 @@ class CropWindow(ctk.CTkToplevel):
         ctk.CTkLabel(panel, text="滚轮:缩放 · 中键拖动:平移\n左键:拖动 9 个手柄调整裁切", justify="left",
                      text_color="gray").pack(anchor="w", padx=12, pady=(8, 0))
 
-        ctk.CTkLabel(panel, text="数据", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
+        ctk.CTkLabel(panel, text="数据", font=ctk.CTkFont(size=H2_SIZE, weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
         rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("pixel_usage", "像素使用比例")]
         self.labels: dict[str, ctk.CTkLabel] = {}
         for i, (key, label) in enumerate(rows):
@@ -304,13 +309,13 @@ class StitcherApp(ctk.CTk):
         frame = ctk.CTkFrame(parent)
         frame.grid(row=0, column=DATA_COL, sticky="ns", padx=(0, 8))
         self.stat_labels: dict[str, ctk.CTkLabel] = {}
-        ctk.CTkLabel(frame, text="数据", font=ctk.CTkFont(weight="bold")).grid(
+        ctk.CTkLabel(frame, text="数据", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 0)
         )
         row = 1
         # ---- 原图
         ctk.CTkLabel(frame, text="原图", text_color=("#1a6fb5", "#8ec9f0"),
-                     font=ctk.CTkFont(size=14, weight="bold")).grid(
+                     font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 2)
         )
         row += 1
@@ -325,7 +330,7 @@ class StitcherApp(ctk.CTk):
             row += 1
         # ---- 输出
         ctk.CTkLabel(frame, text="输出", text_color=("#1a6fb5", "#8ec9f0"),
-                     font=ctk.CTkFont(size=14, weight="bold")).grid(
+                     font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 2)
         )
         row += 1
@@ -350,7 +355,7 @@ class StitcherApp(ctk.CTk):
     def _build_preview(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
         frame.grid(row=0, column=PREVIEW_COL, sticky="nsew")
-        ctk.CTkLabel(frame, text="预览", font=ctk.CTkFont(weight="bold")).pack(
+        ctk.CTkLabel(frame, text="预览", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
         self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H)
