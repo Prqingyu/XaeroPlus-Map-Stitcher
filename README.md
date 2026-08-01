@@ -1,8 +1,10 @@
 # HBNS Map Stitcher
 
-A small command-line tool that stitches Minecraft **map-export tiles** into one large image.
+> A command-line tool for **XaeroPlus (XaroPlus) map exports** — stitch its tile output into one large image.
 
-If you export a Minecraft map as a directory of equal-sized PNG tiles (one per map region), this tool reconstructs the full map: it lays the tiles out on a grid from their filenames, paints any missing cells with a background colour, and writes the result as a single PNG — plus four quadrant crops and a small preview for quick viewing.
+[XaeroPlus](https://github.com/rfresh2/XaeroPlus) (often written "XaroPlus") is a third-party add-on for [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map), created by [rfresh2](https://github.com/rfresh2) and **not affiliated with** the original mod author xaero96. When you export a world from XaeroPlus' world map, it writes the explored region as a directory of equal-sized PNG tiles.
+
+This tool takes that directory and reconstructs the full map: it lays the tiles out on a grid read from their filenames, paints any missing cells with a background colour, and writes the result as a single PNG — plus four quadrant crops and a small preview for quick viewing.
 
 ## Requirements
 
@@ -23,7 +25,7 @@ pip install -r requirements.txt
 python stitch.py <input_dir> [-o <output_dir>] [options]
 ```
 
-Example:
+Example — point it at a XaeroPlus export folder:
 
 ```bash
 python stitch.py "C:\minecraft\map exports\2026-08-01_20.38.43"
@@ -43,20 +45,34 @@ By default the output is written to `<input_dir>_stitched/`; use `-o` to choose 
 | `--preview-scale` | Preview scale factor | `0.15` |
 | `--compress-level` | PNG compression level, `0`–`9` | `6` |
 
-## Tile naming and coordinates
+## XaeroPlus export format
 
-Tiles must be PNG files named as:
+This tool is written for and verified against **XaeroPlus' map export** (the map image export of XaeroPlus, a.k.a. XaroPlus). Its tiles follow this layout:
+
+- One PNG per tile, **1024 × 1024 pixels, 8-bit RGB**, non-interlaced — **1 pixel = 1 block**, so each tile covers a 1024 × 1024 block region.
+- The filename encodes the tile's position:
+
+  ```
+  <relx>_<rely>_x<mcx>_z<mcz>.png
+  ```
+
+  | Part | Meaning |
+  |---|---|
+  | `relx`, `rely` | The tile's position in the export grid. `relx` grows eastward (to the right in the final image); `rely` grows southward (downward). The final image is therefore oriented **north-up**. |
+  | `mcx`, `mcz` | The Minecraft block coordinates of the tile (reported in the log for reference; **not** used for layout). Negative values are written without a `+`, e.g. `x-10240`. |
+
+- One step in the relative grid equals 1024 blocks and 1024 pixels. Example: `34_42_x-10240_z2048.png` sits at grid position `(34, 42)`; grid position `(35, 42)` lies 1024 px to its right.
+
+- Exports are **sparse**: only regions that have been explored or loaded are written, so the grid is usually **not a full rectangle**. Missing cells are painted with the background colour (default black).
+
+Sample filenames from the development dataset:
 
 ```
-<relx>_<rely>_x<mcx>_z<mcz>.png
+34_42_x-10240_z2048.png
+35_35_x-9216_z-5120.png
+45_47_x1024_z7168.png
+52_43_x8192_z3072.png
 ```
-
-- `relx` / `rely` — the tile's position in the grid. `relx` grows eastward (right) and `rely` grows southward (down), so the final image is oriented with north up.
-- `mcx` / `mcz` — the Minecraft world coordinates of the tile. Reported in the log for reference; not used for layout.
-
-One step in the relative grid equals `tile_size` pixels. Tiles need not cover a full rectangle — sparse exports are supported, and missing cells are painted with the background colour.
-
-Example: `34_42_x-10240_z2048.png` sits at relative `(34, 42)`, and relative `(35, 42)` would lie `1024` px to its right.
 
 ## Outputs
 

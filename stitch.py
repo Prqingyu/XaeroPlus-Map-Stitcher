@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HBNS Map Stitcher — stitch Minecraft map-export tiles into one large image.
+"""HBNS Map Stitcher — stitch XaeroPlus (XaroPlus) map-export tiles into one image.
+
+This tool is written for and verified against the map export of XaeroPlus
+(https://github.com/rfresh2/XaeroPlus), a third-party add-on for Xaero's World
+Map. See README.md for the full tile-format documentation.
 
 Expected input
 --------------
-A directory of PNG tiles produced by a Minecraft map renderer, named as::
+A directory of PNG tiles produced by XaeroPlus' map export, named as::
 
     <relx>_<rely>_x<mcx>_z<mcz>.png
 
 ``relx``/``rely`` are the tile's relative grid coordinates, ``mcx``/``mcz`` are
-the Minecraft world coordinates (reported in the log for reference). Every tile
-is assumed to have the same size (default 1024 x 1024). Tiles may cover a
-sparse, non-rectangular region; missing cells are painted with the background
-colour.
+the Minecraft block coordinates (reported in the log for reference). Every tile
+is 1024 x 1024 (1 pixel = 1 block) by default. Tiles may cover a sparse,
+non-rectangular region; missing cells are painted with the background colour.
 
 Example::
 
@@ -145,7 +148,7 @@ def stitch(
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="stitch.py",
-        description="Stitch Minecraft map-export PNG tiles into a single large image.",
+        description="Stitch XaeroPlus (XaroPlus) map-export PNG tiles into a single large image.",
         epilog="Tile names must match <relx>_<rely>_x<mcx>_z<mcz>.png; see the module docstring.",
     )
     ap.add_argument("input_dir", type=Path, help="directory containing the map-export PNG tiles")
