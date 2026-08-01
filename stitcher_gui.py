@@ -36,6 +36,7 @@ import customtkinter as ctk
 from PIL import Image
 
 import stitch_core as core
+from crop_overlay import CropOverlay
 
 Image.MAX_IMAGE_PIXELS = None  # see stitch_core for why
 
@@ -56,7 +57,9 @@ class StitcherApp(ctk.CTk):
         self.ts: core.TileSet | None = None
         self.cal: core.Calibration | None = None
         self.preview_pil: Image.Image | None = None
-        self._preview_ctk: ctk.CTkImage | None = None
+        self.crop_box: tuple[int, int, int, int] | None = None
+        self.crop_active = False
+        self._crop_backup: tuple[int, int, int, int] | None = None
 
         self.queue: queue.Queue = queue.Queue()
         self.cancel_event = threading.Event()
@@ -180,12 +183,26 @@ class StitcherApp(ctk.CTk):
         ctk.CTkLabel(frame, text="预览(~1MB 全图概览)", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
-        self.preview_label = ctk.CTkLabel(
-            frame, text="选择输入目录后自动生成", anchor="center",
-            fg_color=("gray80", "gray20"),
-            width=PREVIEW_BOX_W, height=PREVIEW_BOX_H,
+
+        # crop controls (packed only while crop mode is active)
+        self.crop_bar = ctk.CTkFrame(frame, fg_color="transparent")
+        ctk.CTkLabel(self.crop_bar, text="宽高比:").pack(side="left")
+        self.crop_aspect_var = tk.StringVar(value="自由")
+        self.crop_aspect_menu = ctk.CTkOptionMenu(
+            self.crop_bar, values=["自由", "原比例", "1:1", "4:3", "16:9"],
+            variable=self.crop_aspect_var, command=self._on_crop_aspect, width=92,
         )
-        self.preview_label.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        self.crop_aspect_menu.pack(side="left", padx=(4, 12))
+        ctk.CTkButton(self.crop_bar, text="应用", width=52, command=self._crop_apply).pack(side="left", padx=2)
+        ctk.CTkButton(self.crop_bar, text="取消", width=52, command=self._crop_cancel,
+                      fg_color="gray40", hover_color="gray55").pack(side="left", padx=2)
+        ctk.CTkButton(self.crop_bar, text="重置", width=52, command=self._crop_reset).pack(side="left", padx=2)
+        self.crop_size_label = ctk.CTkLabel(self.crop_bar, text="", anchor="e")
+        self.crop_size_label.pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H, on_change=self._on_crop_change)
+        self.crop_overlay.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+        self.crop_bar.pack_forget()  # hidden until the crop button is pressed
 
     def _build_bottom(self, parent) -> None:
         bottom = ctk.CTkFrame(parent)
@@ -198,6 +215,8 @@ class StitcherApp(ctk.CTk):
         btns.pack(fill="x", padx=10, pady=8)
         self.btn_preview = ctk.CTkButton(btns, text="生成预览", command=self._cmd_preview)
         self.btn_preview.pack(side="left", padx=(0, 8))
+        self.btn_crop = ctk.CTkButton(btns, text="裁切", command=self._cmd_crop)
+        self.btn_crop.pack(side="left", padx=(0, 8))
         self.btn_run = ctk.CTkButton(btns, text="开始拼接", command=self._cmd_run, state="disabled")
         self.btn_run.pack(side="left")
         self.btn_cancel = ctk.CTkButton(
@@ -225,6 +244,7 @@ class StitcherApp(ctk.CTk):
     def _load_input(self, d: str) -> None:
         self.btn_run.configure(state="disabled")
         self.btn_preview.configure(state="disabled")
+        self.btn_crop.configure(state="disabled")
         self._set_progress_indet(True, "正在解析瓦片...")
         self._start_worker(self._worker_load, d, int(self.level_var.get()))
 
@@ -239,8 +259,9 @@ class StitcherApp(ctk.CTk):
 
     def _on_scale(self, _value) -> None:
         if self.ts is not None:
+            region_w, _ = core.region_size(self.ts, self.crop_box)
             scale = min(1.0, max(0.01, self.scale_var.get()))
-            self.width_var.set(str(max(1, round(self.ts.full_width * scale))))
+            self.width_var.set(str(max(1, round(region_w * scale))))
         self._recompute()
 
     def _on_width(self, _event=None) -> None:
@@ -250,8 +271,9 @@ class StitcherApp(ctk.CTk):
             w = max(1, int(self.width_var.get()))
         except ValueError:
             return
+        region_w, _ = core.region_size(self.ts, self.crop_box)
         self.width_var.set(str(w))
-        self.scale_var.set(min(1.0, w / self.ts.full_width))
+        self.scale_var.set(min(1.0, w / region_w))
         self._recompute()
 
     def _on_mb(self, _event=None) -> None:
@@ -271,10 +293,105 @@ class StitcherApp(ctk.CTk):
             messagebox.showwarning(APP_TITLE, "请先选择输入目录")
             return
         self.btn_preview.configure(state="disabled")
+        self.btn_crop.configure(state="disabled")
         self._set_progress_indet(True, "正在生成预览...")
         self._start_worker(
             self._worker_preview, Path(self.input_var.get()), int(self.level_var.get())
         )
+
+    # ------------------------------------------------------------- cropping
+
+    def _cmd_crop(self) -> None:
+        if self.ts is None or self.preview_pil is None:
+            messagebox.showwarning(APP_TITLE, "请先加载输入目录并生成预览")
+            return
+        if self.crop_active:
+            return
+        self.crop_active = True
+        self._crop_backup = self.crop_box
+        self.crop_overlay.set_image(self.preview_pil)
+        if self.crop_box is not None:
+            self.crop_overlay.set_rect(self._map_to_preview(self.crop_box))
+        else:
+            self.crop_overlay.reset()
+        self.crop_overlay.set_active(True)
+        self.crop_bar.pack(fill="x", padx=12)
+        self.btn_crop.configure(text="裁切中...", state="disabled")
+        self.btn_run.configure(state="disabled")  # must apply/cancel first
+        self._update_crop_size()
+
+    def _crop_apply(self) -> None:
+        if not self.crop_active:
+            return
+        self.crop_box = self._map_to_full(self.crop_overlay.get_rect())
+        self._exit_crop_mode()
+        rw, _ = core.region_size(self.ts, self.crop_box)
+        self.width_var.set(str(max(1, round(rw * self.scale_var.get()))))
+        self._recompute()
+        self.status_var.set(f"已应用裁切: {self.crop_box}")
+
+    def _crop_cancel(self) -> None:
+        if not self.crop_active:
+            return
+        self.crop_box = self._crop_backup
+        self._exit_crop_mode()
+        self._recompute()
+        self.status_var.set("已取消裁切")
+
+    def _crop_reset(self) -> None:
+        if self.crop_active:
+            self.crop_overlay.reset()
+            self._update_crop_size()
+
+    def _exit_crop_mode(self) -> None:
+        self.crop_active = False
+        self.crop_overlay.set_active(False)
+        self.crop_bar.pack_forget()
+        self.btn_crop.configure(text="裁切", state="normal")
+        self.btn_run.configure(state="normal")
+
+    def _on_crop_aspect(self, name: str) -> None:
+        mapping = {"自由": "free", "原比例": "original", "1:1": "1:1", "4:3": "4:3", "16:9": "16:9"}
+        self.crop_overlay.set_aspect(mapping.get(name, "free"))
+
+    def _on_crop_change(self, _rect) -> None:
+        if self.crop_active:
+            self._update_crop_size()
+
+    def _update_crop_size(self) -> None:
+        if not self.crop_active or self.ts is None:
+            return
+        left, top, right, bottom = self._map_to_full(self.crop_overlay.get_rect())
+        w, h = right - left, bottom - top
+        if self.mode_var.get() == "resolution":
+            scale = min(1.0, max(0.01, self.scale_var.get()))
+        else:
+            scale = 1.0
+        out_w, out_h = max(1, round(w * scale)), max(1, round(h * scale))
+        self.crop_size_label.configure(text=f"选区 {w}×{h} → 输出 {out_w}×{out_h}")
+
+    def _preview_scale(self) -> float:
+        """Map-scale from the overlay's *displayed* image pixels to map pixels."""
+        if self.ts is None:
+            return 1.0
+        img_w, _ = self.crop_overlay.image_size()
+        if img_w > 0:
+            return img_w / self.ts.full_width
+        return 1.0
+
+    def _map_to_preview(self, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        s = self._preview_scale()
+        left, top, right, bottom = box
+        return round(left * s), round(top * s), round(right * s), round(bottom * s)
+
+    def _map_to_full(self, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        s = self._preview_scale()
+        x0, y0, x1, y1 = rect
+        left = max(0, round(x0 / s))
+        top = max(0, round(y0 / s))
+        right = min(self.ts.full_width, round(x1 / s))
+        bottom = min(self.ts.full_height, round(y1 / s))
+        return left, top, right, bottom
 
     def _cmd_run(self) -> None:
         if self.ts is None or not self.input_var.get():
@@ -298,6 +415,7 @@ class StitcherApp(ctk.CTk):
 
         self.btn_run.configure(state="disabled")
         self.btn_preview.configure(state="disabled")
+        self.btn_crop.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
         self.cancel_event.clear()
         self._set_progress_indet(False)
@@ -335,13 +453,14 @@ class StitcherApp(ctk.CTk):
 
     def _worker_run(self, input_dir: Path, output_dir: Path, level: int, with_quadrants: bool, target) -> None:
         ts = self.ts
+        crop_box = self.crop_box  # snapshot at start
         prog = core.Progress(lambda c, t, s: self._emit_progress(c, t, s))
         try:
             if target[0] == "resolution":
                 scale = target[1]
                 self._emit({"type": "status", "text": f"正在构建画布(比例 {scale*100:.1f}%)..."})
                 canvas = core.build_canvas(ts, input_dir, scale, (0, 0, 0), progress=prog,
-                                           cancel_flag=self.cancel_event)
+                                           cancel_flag=self.cancel_event, crop_box=crop_box)
                 self._emit({"type": "status", "text": "正在编码输出..."})
                 actual = core.encode_png_size(canvas, level)
             else:
@@ -349,7 +468,7 @@ class StitcherApp(ctk.CTk):
                 _scale, canvas, actual = core.solve_scale_for_size(
                     ts, input_dir, target[1] * 1048576, level, (0, 0, 0),
                     progress=prog, cancel_flag=self.cancel_event,
-                    calibration=self.cal,
+                    calibration=self.cal, crop_box=crop_box,
                 )
             out_w, out_h = canvas.size
             self._emit({"type": "progress", "fraction": 0.95})
@@ -394,11 +513,8 @@ class StitcherApp(ctk.CTk):
         return im
 
     def _show_preview(self, pil: Image.Image) -> None:
-        w, h = pil.size
-        fit = min(PREVIEW_BOX_W / w, PREVIEW_BOX_H / h)
-        tw, th = max(1, int(w * fit)), max(1, int(h * fit))
-        self._preview_ctk = ctk.CTkImage(light_image=pil, dark_image=pil, size=(tw, th))
-        self.preview_label.configure(image=self._preview_ctk, text="")
+        self.preview_pil = pil
+        self.crop_overlay.set_image(pil)
 
     def _refresh_stats(self) -> None:
         ts = self.ts
@@ -416,10 +532,11 @@ class StitcherApp(ctk.CTk):
             return
         level = int(self.level_var.get())
         cal = self.cal
+        region_w, region_h = core.region_size(ts, self.crop_box)
         if self.mode_var.get() == "resolution":
             scale = min(1.0, max(0.01, self.scale_var.get()))
-            out_w = max(1, round(ts.full_width * scale))
-            out_h = max(1, round(ts.full_height * scale))
+            out_w = max(1, round(region_w * scale))
+            out_h = max(1, round(region_h * scale))
             self.stat_labels["output_res"].configure(text=f"{out_w} × {out_h}")
             self.stat_labels["scale"].configure(text=f"{scale*100:.1f}%")
             if cal is not None:
@@ -439,11 +556,11 @@ class StitcherApp(ctk.CTk):
                 self.stat_labels["est_size"].configure(text="目标大小无效")
                 return
             if cal is not None:
-                est_full = cal.estimate_bytes(ts.full_pixels, level)
+                est_full = cal.estimate_bytes(region_w * region_h, level)
                 if est_full > 0:
                     scale = min(1.0, math.sqrt(target_b / est_full))
-                    out_w = max(1, round(ts.full_width * scale))
-                    out_h = max(1, round(ts.full_height * scale))
+                    out_w = max(1, round(region_w * scale))
+                    out_h = max(1, round(region_h * scale))
                     self.stat_labels["output_res"].configure(text=f"{out_w} × {out_h}(预估)")
                     self.stat_labels["scale"].configure(text=f"{scale*100:.1f}%(预估)")
                     self.stat_labels["est_size"].configure(text=f"目标 {self.target_mb_var.get()} MB")
@@ -522,8 +639,9 @@ class StitcherApp(ctk.CTk):
         elif t == "stats_actual":
             self.stat_labels["output_res"].configure(text=f"{msg['w']} × {msg['h']}")
             if self.ts is not None:
+                region_w, _ = core.region_size(self.ts, self.crop_box)
                 self.stat_labels["scale"].configure(
-                    text=f"{min(1.0, msg['w']/self.ts.full_width)*100:.1f}%"
+                    text=f"{min(1.0, msg['w']/region_w)*100:.1f}%"
                 )
             self.stat_labels["est_size"].configure(text="-")
             self.stat_labels["actual_size"].configure(text=self._fmt_bytes(msg["bytes"]))
@@ -535,17 +653,20 @@ class StitcherApp(ctk.CTk):
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
             self.btn_preview.configure(state="normal")
+            self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             messagebox.showinfo(APP_TITLE, msg["text"])
         elif t == "done":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
             self.btn_preview.configure(state="normal")
+            self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
         elif t == "error":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
             self.btn_preview.configure(state="normal")
+            self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             messagebox.showerror(APP_TITLE, msg["text"])
 

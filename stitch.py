@@ -59,6 +59,17 @@ def parse_background(text: str) -> tuple[int, int, int]:
     return rgb
 
 
+def parse_crop(text: str) -> tuple[int, int, int, int]:
+    """Parse a ``left,top,right,bottom`` crop box (full-resolution pixels)."""
+    parts = [p.strip() for p in text.split(",")]
+    if len(parts) != 4:
+        raise SystemExit(f"Invalid --crop {text!r}: expected 'left,top,right,bottom'")
+    try:
+        return tuple(int(p) for p in parts)  # type: ignore[return-value]
+    except ValueError:
+        raise SystemExit(f"Invalid --crop {text!r}: components must be integers") from None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="stitch.py",
@@ -76,6 +87,7 @@ def main() -> None:
     ap.add_argument("--no-preview", action="store_true", help="skip the downscaled preview")
     ap.add_argument("--preview-scale", type=float, default=PREVIEW_SCALE, help="preview scale factor (default: 0.15)")
     ap.add_argument("--compress-level", type=int, default=6, choices=range(0, 10), help="PNG compression level 0-9 (default: 6)")
+    ap.add_argument("--crop", type=parse_crop, default=None, help="crop the output to 'left,top,right,bottom' (full-resolution map pixels)")
     args = ap.parse_args()
 
     input_dir = args.input_dir.resolve()
@@ -86,19 +98,21 @@ def main() -> None:
     t0 = time.time()
     ts = core.discover_tiles(input_dir, args.tile_size)
     print(f"Found {ts.count} tile(s)")
+    rw, rh = core.region_size(ts, args.crop)
     print(
-        f"Canvas: {ts.full_width}x{ts.full_height}px ({ts.full_pixels/1e6:.0f} Mpx), "
+        f"Region: {rw}x{rh}px ({rw*rh/1e6:.0f} Mpx), "
         f"grid x[{ts.min_x}..{ts.max_x}] y[{ts.min_y}..{ts.max_y}]"
     )
     print(f"Filled cells: {ts.count}/{ts.cells} ({ts.holes} hole(s) -> background)")
 
-    canvas = core.build_canvas(ts, input_dir, 1.0, args.background, progress=core.Progress(_print_progress))
+    canvas = core.build_canvas(ts, input_dir, 1.0, args.background,
+                               progress=core.Progress(_print_progress), crop_box=args.crop)
     print(f"Pasted {ts.count} tile(s) in {time.time()-t0:.0f}s")
 
     preview = None
     if not args.no_preview:
         pv_scale = max(0.01, min(1.0, args.preview_scale))
-        preview = core.build_canvas(ts, input_dir, pv_scale, args.background)
+        preview = core.build_canvas(ts, input_dir, pv_scale, args.background, crop_box=args.crop)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     written = core.save_outputs(

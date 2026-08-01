@@ -139,6 +139,24 @@ def discover_tiles(input_dir: Path, tile_size: int = 1024) -> TileSet:
     )
 
 
+def region_size(ts: TileSet, crop_box=None) -> tuple[int, int]:
+    """Return the full-resolution size ``(w, h)`` of the region to build.
+
+    ``crop_box`` is ``(left, top, right, bottom)`` in full-resolution map
+    pixels; ``None`` means the whole map.
+    """
+    if crop_box is None:
+        return ts.full_width, ts.full_height
+    left, top, right, bottom = crop_box
+    return max(0, right - left), max(0, bottom - top)
+
+
+def region_pixels(ts: TileSet, crop_box=None) -> int:
+    """Return the full-resolution pixel count of the region to build."""
+    w, h = region_size(ts, crop_box)
+    return w * h
+
+
 def build_canvas(
     ts: TileSet,
     input_dir: Path,
@@ -146,38 +164,63 @@ def build_canvas(
     background: tuple[int, int, int] = (0, 0, 0),
     progress: Progress | None = None,
     cancel_flag=None,
+    crop_box=None,
 ) -> Image.Image:
     """Build a canvas directly at ``scale`` by resizing each tile before pasting.
 
-    At ``scale == 1.0`` no resizing happens and this is equivalent to the
-    classic full-resolution stitch. ``cancel_flag`` is any object with an
-    ``is_set()`` method (e.g. ``threading.Event``); raising
-    :class:`StitchCancelled` when set.
+    ``crop_box`` is ``(left, top, right, bottom)`` in full-resolution map
+    pixels and limits the build to that region (tiles fully outside are
+    skipped); ``None`` builds the whole map. At ``scale == 1.0`` no resizing
+    happens and this is equivalent to the classic full-resolution stitch.
+    ``cancel_flag`` is any object with an ``is_set()`` method (e.g.
+    ``threading.Event``); raises :class:`StitchCancelled` when set.
     """
-    width = max(1, round(ts.full_width * scale))
-    height = max(1, round(ts.full_height * scale))
+    if crop_box is None:
+        left, top, right, bottom = 0, 0, ts.full_width, ts.full_height
+    else:
+        left, top, right, bottom = crop_box
+        left = max(0, min(int(left), ts.full_width))
+        top = max(0, min(int(top), ts.full_height))
+        right = max(0, min(int(right), ts.full_width))
+        bottom = max(0, min(int(bottom), ts.full_height))
+        if right <= left or bottom <= top:
+            raise ValueError(f"invalid crop box: {crop_box}")
+
+    width = max(1, round((right - left) * scale))
+    height = max(1, round((bottom - top) * scale))
     canvas = Image.new("RGB", (width, height), background)
 
     resample = Image.Resampling.LANCZOS if scale < 0.95 else Image.Resampling.BILINEAR
-    tw = max(1, round(ts.tile_size * scale))
-    th = max(1, round(ts.tile_size * scale))
     do_resize = scale != 1.0
 
-    for i, ((rx, ry), path) in enumerate(sorted(ts.tiles.items()), 1):
+    # only tiles that intersect the crop region
+    tiles_in = []
+    for (rx, ry), path in sorted(ts.tiles.items()):
+        tile_l = (rx - ts.min_x) * ts.tile_size
+        tile_t = (ry - ts.min_y) * ts.tile_size
+        if tile_l < right and tile_t < bottom and tile_l + ts.tile_size > left and tile_t + ts.tile_size > top:
+            tiles_in.append((rx, ry, path))
+
+    for i, (rx, ry, path) in enumerate(tiles_in, 1):
         if cancel_flag is not None and cancel_flag.is_set():
             raise StitchCancelled()
-        box = (
-            round((rx - ts.min_x) * ts.tile_size * scale),
-            round((ry - ts.min_y) * ts.tile_size * scale),
-        )
+        tile_l = (rx - ts.min_x) * ts.tile_size
+        tile_t = (ry - ts.min_y) * ts.tile_size
+        # intersection of this tile with the crop region (full-res pixels)
+        ix0, iy0 = max(tile_l, left), max(tile_t, top)
+        ix1, iy1 = min(tile_l + ts.tile_size, right), min(tile_t + ts.tile_size, bottom)
         with Image.open(path) as im:
             if im.mode != "RGB":
                 im = im.convert("RGB")
+            src = (ix0 - tile_l, iy0 - tile_t, ix1 - tile_l, iy1 - tile_t)
+            im = im.crop(src)
             if do_resize:
-                im = im.resize((tw, th), resample)
-            canvas.paste(im, box)
+                dw = max(1, round((ix1 - ix0) * scale))
+                dh = max(1, round((iy1 - iy0) * scale))
+                im = im.resize((dw, dh), resample)
+            canvas.paste(im, (round((ix0 - left) * scale), round((iy0 - top) * scale)))
         if progress is not None:
-            progress(i, ts.count, "build")
+            progress(i, len(tiles_in), "build")
 
     return canvas
 
@@ -258,6 +301,7 @@ def solve_scale_for_size(
     cancel_flag=None,
     max_iterations: int = 4,
     calibration: Calibration | None = None,
+    crop_box=None,
 ) -> tuple[float, Image.Image, int]:
     """Find the scale whose PNG output is close to ``target_bytes``.
 
@@ -265,9 +309,10 @@ def solve_scale_for_size(
     ``scale *= sqrt(target / actual)`` rule because PNG size is ~proportional
     to pixel count. The initial scale is seeded from ``calibration`` (built on
     demand if not given), so the loop usually converges in one or two passes.
+    ``crop_box`` (see :func:`build_canvas`) limits the build to a region.
     """
     cal = calibration if calibration is not None and calibration.level == compress_level else build_calibration(ts, input_dir, compress_level, background)
-    est_full = cal.estimate_bytes(ts.full_pixels, compress_level)
+    est_full = cal.estimate_bytes(region_pixels(ts, crop_box), compress_level)
     scale = min(1.0, math.sqrt(target_bytes / est_full)) if est_full > 0 else 0.5
     scale = max(0.01, scale)
 
@@ -276,7 +321,7 @@ def solve_scale_for_size(
     for _ in range(max_iterations):
         if cancel_flag is not None and cancel_flag.is_set():
             raise StitchCancelled()
-        canvas = build_canvas(ts, input_dir, scale, background, progress, cancel_flag)
+        canvas = build_canvas(ts, input_dir, scale, background, progress, cancel_flag, crop_box=crop_box)
         actual = encode_png_size(canvas, compress_level)
         if progress is not None:
             progress(actual, target_bytes, "encode")

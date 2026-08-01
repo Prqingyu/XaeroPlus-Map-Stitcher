@@ -46,6 +46,7 @@ By default the output is written to `<input_dir>_stitched/`; use `-o` to choose 
 | `--no-preview` | Skip the downscaled preview | `False` |
 | `--preview-scale` | Preview scale factor | `0.15` |
 | `--compress-level` | PNG compression level, `0`–`9` | `6` |
+| `--crop` | Crop the output to `left,top,right,bottom` (full-resolution map pixels) | `None` |
 
 ## GUI
 
@@ -65,6 +66,7 @@ Features:
 - **Compression level** 0–9.
 - **Statistics area** — tile count, input resolution, grid & holes, output resolution, estimated size.
 - **Preview box** — a fixed ~1 MB full-map overview, generated automatically after loading the input.
+- **Interactive cropping** — press **裁切** to enter a photo-editor-style crop mode: drag corners/edges to resize, drag inside to move, drag outside to start a new selection, with aspect-ratio presets (自由 / original / 1:1 / 4:3 / 16:9). The crop limits the stitched output region and the statistics update live. The same region can be set from the CLI with `--crop`.
 - Background-thread stitching with a progress bar and a **Cancel** button.
 
 > **On estimates:** pre-run size estimates are approximate. Large flat regions (e.g. ocean) compress dramatically better at full resolution, so estimates for very large outputs tend to run high. The *by file size* mode does **not** depend on the estimate — it measures the real PNG output and converges to the target within ~5%.
