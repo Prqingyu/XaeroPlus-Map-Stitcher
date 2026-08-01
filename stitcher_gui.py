@@ -61,10 +61,12 @@ H2_SIZE = 14
 # Main window default and minimum size (px). The stitched map is portrait
 # (taller than wide), so increasing WIN_H is what makes the preview bigger.
 WIN_W, WIN_H = 1100, 960
-WIN_MIN_W, WIN_MIN_H = 980, 780
-# Nominal preview canvas size. The preview column expands to fill all
-# leftover horizontal space; the window height controls how tall it gets.
-PREVIEW_BOX_W, PREVIEW_BOX_H = 680, 740
+WIN_MIN_W, WIN_MIN_H = 980, 900
+# Nominal preview canvas size. The preview column expands to fill all leftover
+# space, so these are just the *requested* minimums. PREVIEW_BOX_H must stay
+# small enough that the window's total requested height fits on screen (the
+# preview grows to fill whatever is actually available).
+PREVIEW_BOX_W, PREVIEW_BOX_H = 680, 520
 # The statistics ("数据区") column is fixed-width and never stretches;
 # column weights below give all extra horizontal space to the preview.
 DATA_COL = 0
