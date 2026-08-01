@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Interactive photo-editor-style crop overlay for the XaeroPlus Map Stitcher GUI.
+"""Interactive map canvas for the XaeroPlus Map Stitcher GUI.
 
-:class:`CropOverlay` is a ``tk.Canvas`` that displays an image and lets the
-user drag a crop rectangle over it:
+:class:`CropOverlay` is a ``tk.Canvas`` that displays the map preview with
+photo-viewer-style zooming and panning, and (in crop mode) a draggable crop
+rectangle:
 
-* **9 handles** — 4 corners + 4 edge mid-points + a centre handle. Corners and
-  edges resize the selection; the centre (or dragging anywhere inside) moves it.
-* drag inside the rectangle to move it,
-* drag outside to start a new selection,
-* optional aspect-ratio lock (free / original / 1:1 / 4:3 / 16:9).
+* **Mouse wheel** zooms around the cursor position.
+* **Middle-drag** (or left-drag when not in crop mode) pans.
+* In crop mode, left-drag drives the **9-handle** crop editor:
+  - 4 corner handles move the two adjacent crop lines at once,
+  - 4 edge-midpoint handles move that single edge only,
+  - the centre handle (or dragging inside) moves the whole selection,
+  - dragging outside starts a new selection.
+* Optional aspect-ratio lock (free / original / 1:1 / 4:3 / 16:9).
 
 Coordinates
 -----------
 The selection is tracked in *source* image pixels (the image passed to
-:meth:`set_image`), independent of how the image is displayed. If the canvas
-is resized, only the on-screen scaling changes; the selection keeps meaning
-the same region of the image. Use :meth:`source_size` to map source pixels to
-map pixels.
+:meth:`set_image`), independent of the display zoom/pan. Use
+:meth:`source_size` to map source pixels to map pixels.
 """
 
 from __future__ import annotations
@@ -32,14 +34,16 @@ DIM_COLOR = "#000000"
 SELECT_COLOR = "#e11"
 HANDLE_FILL = "#ffffff"
 CENTER_FILL = "#e11"
+ZOOM_STEP = 1.18
+MAX_RENDER_PX = 4096   # cap the displayed image's longest side to bound memory
 
 # aspect preset name -> ratio (width/height); None = free
 _ASPECT_RATIOS = {"original": None, "1:1": 1.0, "4:3": 4.0 / 3.0, "16:9": 16.0 / 9.0}
 
 # corner handle -> (fixed x index, fixed y index) using (x0,y0)=(0,0),(x1,y1)=(1,1)
 _CORNER_FIXED = {"nw": (1, 1), "ne": (0, 1), "sw": (1, 0), "se": (0, 0)}
-# edge handle -> the corner we treat it as when the aspect is locked
-_EDGE_AS_CORNER = {"n": "nw", "s": "se", "w": "sw", "e": "ne"}
+# edge handle -> the corner it behaves as when the aspect is locked
+_EDGE_AS_CORNER = {"n": "se", "s": "nw", "w": "ne", "e": "sw"}
 
 
 def aspect_value(name: str, src_w: int, src_h: int) -> float | None:
@@ -52,7 +56,7 @@ def aspect_value(name: str, src_w: int, src_h: int) -> float | None:
 
 
 class CropOverlay(tk.Canvas):
-    """Canvas showing an image with a draggable crop rectangle overlay."""
+    """Zoomable/panable canvas with an optional draggable crop rectangle."""
 
     def __init__(self, master, box_w: int, box_h: int, on_change=None, **kwargs):
         super().__init__(
@@ -65,36 +69,53 @@ class CropOverlay(tk.Canvas):
         )
         self._box = (box_w, box_h)
         self._on_change = on_change
-        self._photo: ImageTk.PhotoImage | None = None
+        self.configure(cursor="fleur")
         self._src: Image.Image | None = None
         self._src_w = self._src_h = 0
-        self._disp_scale = 1.0
-        self._ix = self._iy = 0            # displayed image top-left in canvas px
+        self._photo: ImageTk.PhotoImage | None = None
+        self._photo_scale = 0.0
+        self._base_fit = 1.0
+        self._zoom = 1.0
+        self._view_scale = 1.0
+        self._ix = self._iy = 0.0
+        self._last_canvas = (0, 0)
         self._rect = (0, 0, 0, 0)          # selection in source px
         self._aspect_name = "free"
         self._active = False
         self._drag = None
+        self._pan = None
 
         self.bind("<Button-1>", self._press)
         self.bind("<B1-Motion>", self._motion)
         self.bind("<ButtonRelease-1>", self._release)
+        self.bind("<Button-2>", self._pan_start)
+        self.bind("<B2-Motion>", self._pan_move)
+        self.bind("<ButtonRelease-2>", self._pan_end)
+        self.bind("<MouseWheel>", self._wheel)
         self.bind("<Configure>", self._on_configure)
 
     # ------------------------------------------------------------- public
 
     def set_image(self, pil: Image.Image) -> None:
-        """Display ``pil`` (source coords) and reset the selection to full."""
+        """Display ``pil`` (source coords) fit-to-canvas, reset selection & view."""
         self._src = pil
         self._src_w, self._src_h = pil.size
-        self._update_display()
+        self._photo = None
+        self._photo_scale = 0.0
+        self._zoom = 1.0
+        self._last_canvas = (0, 0)
+        w, h = self.winfo_width(), self.winfo_height()
+        if w <= 1 or h <= 1:
+            w, h = self._box
+        self._set_view(w, h)
         self._rect = (0, 0, self._src_w, self._src_h)
         self._redraw()
 
     def set_active(self, active: bool) -> None:
-        """Enable/disable crop mode (mouse handling + overlay)."""
+        """Enable/disable crop mode (left-drag crops; otherwise it pans)."""
         self._active = active
         self._redraw()
-        self.configure(cursor="crosshair" if active else "")
+        self.configure(cursor="crosshair" if active else "fleur")
 
     def set_aspect(self, name: str) -> None:
         self._aspect_name = name
@@ -128,37 +149,139 @@ class CropOverlay(tk.Canvas):
         """Size of the source image in source pixels (used to map to the map)."""
         return self._src_w, self._src_h
 
-    # ----------------------------------------------------------- internals
+    # ------------------------------------------------------- view / zoom / pan
 
-    def _notify(self) -> None:
-        if self._on_change is not None:
-            self._on_change(self.get_rect())
+    def _set_view(self, canvas_w: int, canvas_h: int) -> None:
+        """(Re)fit the view to ``canvas_w x canvas_h``, preserving zoom & centre."""
+        if self._src is None:
+            return
+        old_w, old_h = self._last_canvas
+        if old_w <= 1 or old_h <= 1:
+            self._base_fit = min(canvas_w / self._src_w, canvas_h / self._src_h)
+            self._view_scale = self._base_fit * self._zoom
+            self._ix = (canvas_w - self._src_w * self._view_scale) / 2
+            self._iy = (canvas_h - self._src_h * self._view_scale) / 2
+        else:
+            scx = (old_w / 2 - self._ix) / self._view_scale
+            scy = (old_h / 2 - self._iy) / self._view_scale
+            self._base_fit = min(canvas_w / self._src_w, canvas_h / self._src_h)
+            self._view_scale = self._base_fit * self._zoom
+            self._ix = canvas_w / 2 - scx * self._view_scale
+            self._iy = canvas_h / 2 - scy * self._view_scale
+        self._last_canvas = (canvas_w, canvas_h)
+        self._clamp_view(canvas_w, canvas_h)
 
     def _on_configure(self, _event) -> None:
         if self._src is not None:
-            self._update_display()
+            self._set_view(self.winfo_width(), self.winfo_height())
             self._redraw()
 
-    def _update_display(self) -> None:
-        """Re-scale the displayed image to the current canvas size."""
+    def _clamp_view(self, canvas_w: int, canvas_h: int) -> None:
+        dw = self._src_w * self._view_scale
+        dh = self._src_h * self._view_scale
+        if dw >= canvas_w:
+            self._ix = min(0.0, max(canvas_w - dw, self._ix))
+        else:
+            self._ix = (canvas_w - dw) / 2
+        if dh >= canvas_h:
+            self._iy = min(0.0, max(canvas_h - dh, self._iy))
+        else:
+            self._iy = (canvas_h - dh) / 2
+
+    def _wheel(self, event) -> None:
         if self._src is None:
             return
-        bw, bh = self.winfo_width(), self.winfo_height()
-        if bw <= 1 or bh <= 1:
-            bw, bh = self._box
-        scale = min(bw / self._src_w, bh / self._src_h)
-        self._disp_scale = scale
-        dw, dh = max(1, round(self._src_w * scale)), max(1, round(self._src_h * scale))
-        resized = self._src.resize((dw, dh), Image.Resampling.BILINEAR)
-        self._photo = ImageTk.PhotoImage(resized)
-        self._ix = (bw - dw) // 2
-        self._iy = (bh - dh) // 2
+        factor = ZOOM_STEP if event.delta > 0 else 1 / ZOOM_STEP
+        max_scale = MAX_RENDER_PX / max(self._src_w, self._src_h)
+        min_scale = 0.05 * (self._base_fit or 1.0)
+        new_scale = max(min_scale, min(max_scale, self._view_scale * factor))
+        if abs(new_scale - self._view_scale) < 1e-9:
+            return
+        sx = (event.x - self._ix) / self._view_scale
+        sy = (event.y - self._iy) / self._view_scale
+        self._view_scale = new_scale
+        self._zoom = new_scale / self._base_fit
+        self._ix = event.x - sx * new_scale
+        self._iy = event.y - sy * new_scale
+        self._clamp_view(self.winfo_width(), self.winfo_height())
+        self._redraw()
 
-    def _to_canvas(self, sx: float, sy: float) -> tuple[int, int]:
-        return int(self._ix + sx * self._disp_scale), int(self._iy + sy * self._disp_scale)
+    def _pan_start(self, event) -> None:
+        self._pan = (event.x, event.y)
 
-    def _to_src(self, cx: int, cy: int) -> tuple[float, float]:
-        return (cx - self._ix) / self._disp_scale, (cy - self._iy) / self._disp_scale
+    def _pan_move(self, event) -> None:
+        if self._pan is None:
+            return
+        dx, dy = event.x - self._pan[0], event.y - self._pan[1]
+        self._pan = (event.x, event.y)
+        self._ix += dx
+        self._iy += dy
+        self._clamp_view(self.winfo_width(), self.winfo_height())
+        self._redraw()
+
+    def _pan_end(self, _event) -> None:
+        self._pan = None
+
+    # ---------------------------------------------------- mouse (crop / pan)
+
+    def _press(self, event) -> None:
+        if self._active:
+            self._crop_press(event)
+        else:
+            self._pan_start(event)
+
+    def _motion(self, event) -> None:
+        if self._active:
+            self._crop_motion(event)
+        else:
+            self._pan_move(event)
+
+    def _release(self, event) -> None:
+        if self._active:
+            self._crop_release(event)
+        else:
+            self._pan_end(event)
+
+    def _crop_press(self, event) -> None:
+        kind, name = self._hit_test(event.x, event.y)
+        if kind == "handle":
+            if name == "center":
+                self._drag = {"mode": "move", "start": self._to_src(event.x, event.y), "rect": self._rect}
+                self.configure(cursor="fleur")
+                return
+            self._drag = {"mode": "handle", "name": name, "rect": self._rect}
+            self._update_cursor(name)
+        elif kind == "inside":
+            self._drag = {"mode": "move", "start": self._to_src(event.x, event.y), "rect": self._rect}
+            self.configure(cursor="fleur")
+        else:
+            self._drag = {"mode": "new", "start": self._to_src(event.x, event.y)}
+            self.configure(cursor="crosshair")
+
+    def _crop_motion(self, event) -> None:
+        if self._drag is None:
+            return
+        sx, sy = self._to_src(event.x, event.y)
+        d = self._drag
+        if d["mode"] == "new":
+            self._rect = self._norm(d["start"][0], d["start"][1], sx, sy)
+        elif d["mode"] == "move":
+            dx, dy = sx - d["start"][0], sy - d["start"][1]
+            x0, y0, x1, y1 = d["rect"]
+            self._rect = self._norm(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+        else:
+            self._rect = self._handle_rect(d, sx, sy)
+            self._update_cursor(d["name"])
+        self._clamp_rect()
+        self._redraw()
+        self._notify()
+
+    def _crop_release(self, _event) -> None:
+        self._drag = None
+        if self._active:
+            self.configure(cursor="crosshair")
+
+    # ------------------------------------------------------------- cropping
 
     def _current_aspect(self) -> float | None:
         return aspect_value(self._aspect_name, self._src_w, self._src_h)
@@ -184,62 +307,18 @@ class CropOverlay(tk.Canvas):
             return "inside", None
         return "outside", None
 
-    def _press(self, event) -> None:
-        if not self._active:
-            return
-        kind, name = self._hit_test(event.x, event.y)
-        if kind == "handle":
-            if name == "center":
-                self._drag = {"mode": "move", "start": self._to_src(event.x, event.y), "rect": self._rect}
-                self.configure(cursor="fleur")
-                return
-            if self._current_aspect() is not None and name in _EDGE_AS_CORNER:
-                name = _EDGE_AS_CORNER[name]
-            anchor = self._fixed_corner(name)
-            self._drag = {"mode": "handle", "name": name, "anchor": anchor, "rect": self._rect}
-            self._update_cursor(name)
-        elif kind == "inside":
-            self._drag = {"mode": "move", "start": self._to_src(event.x, event.y), "rect": self._rect}
-            self.configure(cursor="fleur")
-        else:
-            self._drag = {"mode": "new", "start": self._to_src(event.x, event.y)}
-            self.configure(cursor="crosshair")
-
-    def _motion(self, event) -> None:
-        if not self._active or self._drag is None:
-            return
-        sx, sy = self._to_src(event.x, event.y)
-        d = self._drag
-        if d["mode"] == "new":
-            self._rect = self._norm(d["start"][0], d["start"][1], sx, sy)
-        elif d["mode"] == "move":
-            dx, dy = sx - d["start"][0], sy - d["start"][1]
-            x0, y0, x1, y1 = d["rect"]
-            self._rect = self._norm(x0 + dx, y0 + dy, x1 + dx, y1 + dy)
-        else:  # handle
-            self._rect = self._handle_rect(d, sx, sy)
-            self._update_cursor(d["name"])
-        self._clamp_rect()
-        self._redraw()
-        self._notify()
-
-    def _release(self, _event) -> None:
-        if not self._active:
-            return
-        self._drag = None
-        if self._active:
-            self.configure(cursor="crosshair")
-
-    def _fixed_corner(self, name: str) -> tuple[int, int]:
-        x0, y0, x1, y1 = self._rect
-        fx, fy = _CORNER_FIXED[name]
-        return (x1 if fx else x0), (y1 if fy else y0)
-
     def _handle_rect(self, drag, sx: float, sy: float):
+        """Resize the selection for a dragged handle.
+
+        Free aspect: an edge handle moves only that edge; a corner handle moves
+        the two adjacent edges together. Locked aspect: every handle behaves as
+        a corner resize so the ratio is preserved.
+        """
         name = drag["name"]
         aspect = self._current_aspect()
         if aspect is not None:
-            ax, ay = drag["anchor"]
+            corner = _EDGE_AS_CORNER.get(name, name)
+            ax, ay = self._fixed_corner(corner)
             return self._corner_resize(ax, ay, sx, sy, aspect)
         x0, y0, x1, y1 = drag["rect"]
         if name == "n":
@@ -250,8 +329,14 @@ class CropOverlay(tk.Canvas):
             return (sx, y0, x1, y1)
         if name == "e":
             return (x0, y0, sx, y1)
-        ax, ay = drag["anchor"]
+        # corners: free-form between the fixed corner and the pointer
+        ax, ay = self._fixed_corner(name)
         return self._norm(ax, ay, sx, sy)
+
+    def _fixed_corner(self, name: str) -> tuple[float, float]:
+        x0, y0, x1, y1 = self._rect
+        fx, fy = _CORNER_FIXED[name]
+        return (x1 if fx else x0), (y1 if fy else y0)
 
     def _corner_resize(self, ax: float, ay: float, sx: float, sy: float, aspect: float):
         """Rect of the given aspect anchored at fixed corner ``(ax, ay)``."""
@@ -308,16 +393,35 @@ class CropOverlay(tk.Canvas):
         }
         self.configure(cursor=cursors.get(name, "crosshair"))
 
+    # -------------------------------------------------------------- drawing
+
+    def _to_canvas(self, sx: float, sy: float) -> tuple[int, int]:
+        return int(self._ix + sx * self._view_scale), int(self._iy + sy * self._view_scale)
+
+    def _to_src(self, cx: int, cy: int) -> tuple[float, float]:
+        return (cx - self._ix) / self._view_scale, (cy - self._iy) / self._view_scale
+
+    def _ensure_photo(self) -> None:
+        if self._src is None:
+            return
+        scale = self._view_scale
+        if self._photo is not None and self._photo_scale and abs(scale - self._photo_scale) / scale < 0.02:
+            return
+        dw = max(1, round(self._src_w * scale))
+        dh = max(1, round(self._src_h * scale))
+        self._photo = ImageTk.PhotoImage(self._src.resize((dw, dh), Image.Resampling.BILINEAR))
+        self._photo_scale = scale
+
     def _redraw(self) -> None:
         self.delete("all")
-        if self._photo is None:
+        if self._src is None:
             return
-        self.create_image(self._ix, self._iy, anchor="nw", image=self._photo)
+        self._ensure_photo()
+        self.create_image(int(self._ix), int(self._iy), anchor="nw", image=self._photo)
         if not self._active:
             return
         x0, y0, x1, y1 = self._rect
         c = self._to_canvas
-        # dim the area outside the selection
         for dx0, dy0, dx1, dy1 in (
             (0, 0, self._src_w, y0),              # top
             (0, y1, self._src_w, self._src_h),    # bottom
@@ -326,9 +430,7 @@ class CropOverlay(tk.Canvas):
         ):
             if dx1 > dx0 and dy1 > dy0:
                 self.create_rectangle(c(dx0, dy0), c(dx1, dy1), fill=DIM_COLOR, stipple="gray25", outline="")
-        # selection border
         self.create_rectangle(c(x0, y0), c(x1, y1), outline=SELECT_COLOR, width=2)
-        # handles: 4 corners + 4 edges (squares) + centre (dot)
         for name, hx, hy in self._handle_positions():
             px, py = c(hx, hy)
             if name == "center":

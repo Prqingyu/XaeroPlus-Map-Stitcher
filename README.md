@@ -59,13 +59,13 @@ python stitcher_gui.py
 Features:
 
 - **Input / output pickers** — select the XaeroPlus export directory and an output location. By default the output folder is created *next to* the input as `<input>_stitched`; use **Browse** to place it anywhere.
-- **Linked output controls** — the two modes stay in sync:
+- **Linked output controls** — the two modes stay in sync, and **both default to the original full resolution** (downscaling only happens when you pick a smaller width or enter a target size):
   - *By resolution*: set the output width (or drag the scale slider); the resulting file size is estimated live.
-  - *By file size*: set a target size in MB; the tool iteratively solves for the matching resolution.
-- **Compression level** 0–9.
+  - *By file size*: leave the target empty for the original resolution, or enter a size in MB and the tool iteratively solves for the matching resolution.
+- **Compression level** 0–9. PNG is lossless — the level only trades encode time against file size (0 = fastest/largest, 9 = slowest/smallest, 6 = default balance).
 - **Statistics area** — tile count, input resolution, grid & holes, output resolution, estimated size.
-- **Preview box** — a fixed ~1 MB full-map overview, generated automatically after loading the input.
-- **Interactive cropping** — press **裁切** to open a dedicated crop window that combines a large map canvas with a data panel. The map canvas is photo-editor-style: **9 handles** (4 corners, 4 edge mid-points, and a centre point) to resize the border, drag inside the selection to move it, drag outside to start a new selection, and aspect-ratio presets (自由 / original / 1:1 / 4:3 / 16:9). The crop limits the stitched output region and the statistics update live. The same region can be set from the CLI with `--crop`.
+- **Preview box** — a fixed ~1 MB full-map overview, generated automatically after loading the input. Like a photo viewer, it **zooms with the mouse wheel and pans by dragging**.
+- **Interactive cropping** — press **裁切** to open a dedicated crop window that combines a large map canvas with a data panel. The map canvas is photo-editor-style: **9 handles** — an **edge-midpoint handle moves that one edge only**, a **corner handle moves the two adjacent edges together**, the centre handle (or dragging inside) moves the whole selection, and dragging outside starts a new selection. It also zooms (wheel) and pans (middle-drag), with aspect-ratio presets (自由 / original / 1:1 / 4:3 / 16:9). The crop limits the stitched output region and the statistics update live. The same region can be set from the CLI with `--crop`.
 - Background-thread stitching with a progress bar and a **Cancel** button.
 
 > **On estimates:** pre-run size estimates are approximate. Large flat regions (e.g. ocean) compress dramatically better at full resolution, so estimates for very large outputs tend to run high. The *by file size* mode does **not** depend on the estimate — it measures the real PNG output and converges to the target within ~5%.

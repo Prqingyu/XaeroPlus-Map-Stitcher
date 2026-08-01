@@ -13,14 +13,19 @@ Run::
 Features
 --------
 * Pick a XaeroPlus export directory and an output directory.
-* Two linked output modes (the setting sits directly below the mode selector):
+* Two linked output modes (the setting sits directly below the mode selector).
+  Both default to the **original full resolution**; downscaling happens only
+  when you pick a smaller width or enter a target file size.
   - by resolution  (set output width / scale, size is estimated)
-  - by file size   (set a target size in MB, resolution is solved iteratively)
-* PNG compression level 0-9.
+  - by file size   (leave the target empty for original resolution, or enter a
+    size in MB and the resolution is solved iteratively)
+* PNG compression level 0-9 (lossless; affects file size / encode time only).
 * A statistics area (tile count, grid, resolution, estimated size) and a
-  fixed ~1 MB full-map preview.
+  fixed ~1 MB full-map preview. The preview zooms with the mouse wheel and
+  pans by dragging, like a photo viewer.
 * **Cropping** opens a dedicated crop window that combines a large map canvas
-  (photo-editor-style: 9 handles, drag to move/resize) with a data panel.
+  (photo-editor-style: 9 handles, drag to move/resize, zoom & pan) with a
+  data panel.
 * All heavy work runs in a background thread; the UI stays responsive and the
   operation can be cancelled.
 """
@@ -95,6 +100,9 @@ class CropWindow(ctk.CTkToplevel):
         ctk.CTkOptionMenu(
             row, values=ASPECT_LABELS, variable=self.aspect_var, command=self._on_aspect, width=92,
         ).pack(side="left", padx=6)
+
+        ctk.CTkLabel(panel, text="滚轮:缩放 · 中键拖动:平移\n左键:拖动 9 个手柄调整裁切", justify="left",
+                     text_color="gray").pack(anchor="w", padx=12, pady=(8, 0))
 
         ctk.CTkLabel(panel, text="数据区", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
         rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("scale", "输出比例")]
@@ -179,7 +187,7 @@ class StitcherApp(ctk.CTk):
         self.mode_var = tk.StringVar(value="resolution")
         self.width_var = tk.StringVar()
         self.scale_var = tk.DoubleVar(value=1.0)
-        self.target_mb_var = tk.StringVar(value="100")
+        self.target_mb_var = tk.StringVar(value="")
         self.level_var = tk.DoubleVar(value=DEFAULT_LEVEL)
 
         self._build_ui()
@@ -255,7 +263,7 @@ class StitcherApp(ctk.CTk):
         self.mb_entry.pack(side="left", padx=6)
         self.mb_entry.bind("<Return>", self._on_mb)
         self.mb_entry.bind("<FocusOut>", self._on_mb)
-        ctk.CTkLabel(self.size_frame, text="(分辨率将按目标大小自动求解)").pack(side="left", padx=8)
+        ctk.CTkLabel(self.size_frame, text="(留空 = 不限制,按原始分辨率输出;填数字则自动求解分辨率)").pack(side="left", padx=8)
 
         # ---- compression level
         compf = ctk.CTkFrame(section, fg_color="transparent")
@@ -304,7 +312,10 @@ class StitcherApp(ctk.CTk):
             anchor="w", padx=12, pady=(10, 4)
         )
         self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H)
-        self.crop_overlay.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+        self.crop_overlay.pack(fill="both", expand=True, padx=12, pady=(2, 0))
+        ctk.CTkLabel(frame, text="滚轮缩放 · 按住拖动平移", text_color="gray", anchor="center").pack(
+            pady=(0, 8)
+        )
 
     def _build_bottom(self, parent) -> None:
         bottom = ctk.CTkFrame(parent)
@@ -415,7 +426,9 @@ class StitcherApp(ctk.CTk):
         self.btn_preview.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
         self._crop_window = CropWindow(
-            self, self.ts, self.preview_pil, lambda: self.scale_var.get(), self.crop_box
+            self, self.ts, self.preview_pil,
+            lambda: (self.scale_var.get() if self.mode_var.get() == "resolution" else 1.0),
+            self.crop_box,
         )
 
     def _crop_applied(self, box: tuple[int, int, int, int]) -> None:
@@ -443,14 +456,18 @@ class StitcherApp(ctk.CTk):
             messagebox.showwarning(APP_TITLE, "请设置输出目录")
             return
         if self.mode_var.get() == "size":
-            try:
-                mb = float(self.target_mb_var.get())
-                if mb <= 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showwarning(APP_TITLE, "目标大小必须是正数(MB)")
-                return
-            target = ("size", mb)
+            target_text = self.target_mb_var.get().strip()
+            if target_text:
+                try:
+                    mb = float(target_text)
+                    if mb <= 0:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showwarning(APP_TITLE, "目标大小必须是正数(MB),或留空按原始分辨率输出")
+                    return
+                target = ("size", mb)
+            else:
+                target = ("resolution", 1.0)  # empty -> original resolution
         else:
             target = ("resolution", min(1.0, self.scale_var.get()))
 
@@ -586,8 +603,16 @@ class StitcherApp(ctk.CTk):
                 self.stat_labels["est_size"].configure(text="-")
             self.stat_labels["actual_size"].configure(text="-")
         else:  # by file size: show the *estimated* resolution for the target
+            target_text = self.target_mb_var.get().strip()
+            if not target_text:
+                # unlimited -> original resolution
+                self.stat_labels["output_res"].configure(text=f"{region_w} × {region_h}")
+                self.stat_labels["scale"].configure(text="100%")
+                self.stat_labels["est_size"].configure(text="不限制(原始分辨率)")
+                self.stat_labels["actual_size"].configure(text="-")
+                return
             try:
-                target_b = float(self.target_mb_var.get()) * 1048576
+                target_b = float(target_text) * 1048576
                 if target_b <= 0:
                     raise ValueError
             except ValueError:
