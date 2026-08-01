@@ -58,13 +58,13 @@ def aspect_value(name: str, src_w: int, src_h: int) -> float | None:
 class CropOverlay(tk.Canvas):
     """Zoomable/panable canvas with an optional draggable crop rectangle."""
 
-    def __init__(self, master, box_w: int, box_h: int, on_change=None, **kwargs):
+    def __init__(self, master, box_w: int, box_h: int, on_change=None, bg: str = "#202020", **kwargs):
         super().__init__(
             master,
             width=box_w,
             height=box_h,
             highlightthickness=0,
-            bg="#202020",
+            bg=bg,
             **kwargs,
         )
         self._box = (box_w, box_h)

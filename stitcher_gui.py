@@ -73,6 +73,19 @@ PREVIEW_COL = 1
 ASPECT_LABELS = ["自由", "原比例", "1:1", "4:3", "16:9"]
 
 
+def _theme_bg(frame) -> str:
+    """Resolve a frame's background to a single colour for the current theme.
+
+    ``CTkFrame.cget("fg_color")`` returns a ``(light, dark)`` pair; this
+    resolves it to the one actually in use so plain ``tk.Canvas`` widgets
+    (the map preview) match the surrounding UI in both light and dark mode.
+    """
+    try:
+        return frame._apply_appearance_mode(frame.cget("fg_color"))
+    except Exception:  # noqa: BLE001
+        return "#202020"
+
+
 class CropWindow(ctk.CTkToplevel):
     """A dedicated crop editor: large map canvas + a data/controls panel."""
 
@@ -95,7 +108,7 @@ class CropWindow(ctk.CTkToplevel):
         self._build_panel(panel)
 
         # large map canvas on the left
-        self.overlay = CropOverlay(root, 820, 700, on_change=self._on_change)
+        self.overlay = CropOverlay(root, 820, 700, on_change=self._on_change, bg=_theme_bg(root))
         self.overlay.pack(side="left", fill="both", expand=True)
 
         self.overlay.set_image(preview_pil)
@@ -327,8 +340,7 @@ class StitcherApp(ctk.CTk):
         )
         row = 1
         # ---- 原图
-        ctk.CTkLabel(frame, text="原图", text_color=("#1a6fb5", "#8ec9f0"),
-                     font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
+        ctk.CTkLabel(frame, text="原图", font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 2)
         )
         row += 1
@@ -342,8 +354,7 @@ class StitcherApp(ctk.CTk):
             self._data_row(frame, row, key, label)
             row += 1
         # ---- 输出
-        ctk.CTkLabel(frame, text="输出", text_color=("#1a6fb5", "#8ec9f0"),
-                     font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
+        ctk.CTkLabel(frame, text="输出", font=ctk.CTkFont(size=H2_SIZE, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 2)
         )
         row += 1
@@ -371,7 +382,7 @@ class StitcherApp(ctk.CTk):
         ctk.CTkLabel(frame, text="预览", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
-        self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H)
+        self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H, bg=_theme_bg(frame))
         self.crop_overlay.pack(fill="both", expand=True, padx=12, pady=(2, 0))
         ctk.CTkLabel(frame, text="滚轮缩放 · 按住拖动平移", text_color="gray", anchor="center").pack(
             pady=(0, 8)
