@@ -232,7 +232,7 @@ class StitcherApp(ctk.CTk):
 
     def _add_path_row(self, parent, row: int, label: str, var, browse_cb) -> None:
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.pack(fill="x", pady=3)
+        frame.pack(fill="x", padx=10, pady=3)  # padx aligns with the settings below
         ctk.CTkLabel(frame, text=label, width=70, anchor="w").pack(side="left")
         ctk.CTkEntry(frame, textvariable=var).pack(side="left", fill="x", expand=True, padx=6)
         ctk.CTkButton(frame, text="浏览...", width=76, command=browse_cb).pack(side="left")
@@ -275,7 +275,9 @@ class StitcherApp(ctk.CTk):
         self.mb_entry.pack(side="left", padx=6)
         self.mb_entry.bind("<Return>", self._on_mb)
         self.mb_entry.bind("<FocusOut>", self._on_mb)
-        ctk.CTkLabel(self.size_frame, text="(留空 = 不限制,按原始分辨率输出;填数字则自动求解分辨率)").pack(side="left", padx=8)
+        self.orig_size_label = ctk.CTkLabel(self.size_frame, text="", text_color="gray")
+        self.orig_size_label.pack(side="left", padx=(4, 8))
+        ctk.CTkLabel(self.size_frame, text="(留空 = 不限制,按原始分辨率)").pack(side="left")
 
         # ---- compression level
         compf = ctk.CTkFrame(section, fg_color="transparent")
@@ -308,7 +310,8 @@ class StitcherApp(ctk.CTk):
         )
         row = 1
         # ---- 原图区
-        ctk.CTkLabel(frame, text="原图区", text_color="gray", font=ctk.CTkFont(size=12)).grid(
+        ctk.CTkLabel(frame, text="原图区", text_color=("#1a6fb5", "#8ec9f0"),
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 2)
         )
         row += 1
@@ -322,7 +325,8 @@ class StitcherApp(ctk.CTk):
             self._data_row(frame, row, key, label)
             row += 1
         # ---- 输出区
-        ctk.CTkLabel(frame, text="输出区", text_color="gray", font=ctk.CTkFont(size=12)).grid(
+        ctk.CTkLabel(frame, text="输出区", text_color=("#1a6fb5", "#8ec9f0"),
+                     font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 2)
         )
         row += 1
@@ -626,6 +630,14 @@ class StitcherApp(ctk.CTk):
         level = int(self.level_var.get())
         cal = self.cal
         region_w, region_h = core.region_size(ts, self.crop_box)
+        # reference: estimated size if output at the original resolution
+        if hasattr(self, "orig_size_label"):
+            if cal is not None:
+                self.orig_size_label.configure(
+                    text=f"原图约 {self._fmt_bytes(cal.estimate_bytes(region_w * region_h, level))}"
+                )
+            else:
+                self.orig_size_label.configure(text="")
         if self.mode_var.get() == "resolution":
             scale = min(1.0, max(0.01, self.scale_var.get()))
             out_w = max(1, round(region_w * scale))
@@ -634,7 +646,7 @@ class StitcherApp(ctk.CTk):
             self.stat_labels["pixel_usage"].configure(text=self._pixel_usage(out_w, out_h, region_w, region_h))
             if cal is not None:
                 est = cal.estimate_bytes(out_w * out_h, level)
-                self.stat_labels["est_size"].configure(text=f"{self._fmt_bytes(est)} (预估,可能偏大)")
+                self.stat_labels["est_size"].configure(text=f"{self._fmt_bytes(est)} ")
             else:
                 self.stat_labels["est_size"].configure(text="-")
             self.stat_labels["actual_size"].configure(text="-")
@@ -644,7 +656,7 @@ class StitcherApp(ctk.CTk):
                 # unlimited -> original resolution
                 self.stat_labels["output_res"].configure(text=f"{region_w} × {region_h}")
                 self.stat_labels["pixel_usage"].configure(text="100%")
-                self.stat_labels["est_size"].configure(text="不限制(原始分辨率)")
+                self.stat_labels["est_size"].configure(text="不限制")
                 self.stat_labels["actual_size"].configure(text="-")
                 return
             try:
