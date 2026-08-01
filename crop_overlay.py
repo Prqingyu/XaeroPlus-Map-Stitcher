@@ -195,7 +195,8 @@ class CropOverlay(tk.Canvas):
     def _on_configure(self, _event) -> None:
         if self._src is not None:
             self._set_view(self.winfo_width(), self.winfo_height())
-            self._redraw()
+        # redraw even without an image so the placeholder re-centres on resize
+        self._redraw()
 
     def _clamp_view(self, canvas_w: int, canvas_h: int) -> None:
         dw = self._src_w * self._view_scale
@@ -443,7 +444,7 @@ class CropOverlay(tk.Canvas):
                 if cx <= 1 or cy <= 1:
                     cx, cy = self._box
                 self.create_text(cx / 2, cy / 2, text=self._placeholder,
-                                 fill="#8a8a8a", font=("Segoe UI", 13))
+                                 fill="#8a8a8a", font=("Segoe UI", 15))
             return
         self._ensure_photo()
         self.create_image(int(self._ix), int(self._iy), anchor="nw", image=self._photo)
