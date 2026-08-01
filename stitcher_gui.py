@@ -279,6 +279,9 @@ class StitcherApp(ctk.CTk):
         """Output settings block: mode selector first, then its setting, then level."""
         section = ctk.CTkFrame(parent)
         section.pack(fill="x", pady=(6, 0))
+        ctk.CTkLabel(section, text="导出设置", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).pack(
+            anchor="w", padx=12, pady=(8, 2)
+        )
 
         # ---- mode selector
         modef = ctk.CTkFrame(section, fg_color="transparent")
