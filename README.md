@@ -2,7 +2,7 @@
 
 > **XaeroPlus 分片地图整合工具** — 将 XaeroPlus(XaroPlus)导出的分片地图瓦片拼接成一张大图。
 >
-> A command-line tool that stitches **XaeroPlus (XaroPlus) map exports** into one large image.
+> A command-line **and GUI** tool that stitches **XaeroPlus (XaroPlus) map exports** into one large image.
 
 [XaeroPlus](https://github.com/rfresh2/XaeroPlus) (often written "XaroPlus") is a third-party add-on for [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map), created by [rfresh2](https://github.com/rfresh2) and **not affiliated with** the original mod author xaero96. When you export a world from XaeroPlus' world map, it writes the explored region as a directory of equal-sized PNG tiles.
 
@@ -46,6 +46,28 @@ By default the output is written to `<input_dir>_stitched/`; use `-o` to choose 
 | `--no-preview` | Skip the downscaled preview | `False` |
 | `--preview-scale` | Preview scale factor | `0.15` |
 | `--compress-level` | PNG compression level, `0`–`9` | `6` |
+
+## GUI
+
+A graphical front-end built with [CustomTkinter](https://customtkinter.github.io/):
+
+```bash
+pip install -r requirements-gui.txt
+python stitcher_gui.py
+```
+
+Features:
+
+- **Input / output pickers** — select the XaeroPlus export directory and an output location. By default the output folder is created *next to* the input as `<input>_stitched`; use **Browse** to place it anywhere.
+- **Linked output controls** — the two modes stay in sync:
+  - *By resolution*: set the output width (or drag the scale slider); the resulting file size is estimated live.
+  - *By file size*: set a target size in MB; the tool iteratively solves for the matching resolution.
+- **Compression level** 0–9.
+- **Statistics area** — tile count, input resolution, grid & holes, output resolution, estimated size.
+- **Preview box** — a fixed ~1 MB full-map overview, generated automatically after loading the input.
+- Background-thread stitching with a progress bar and a **Cancel** button.
+
+> **On estimates:** pre-run size estimates are approximate. Large flat regions (e.g. ocean) compress dramatically better at full resolution, so estimates for very large outputs tend to run high. The *by file size* mode does **not** depend on the estimate — it measures the real PNG output and converges to the target within ~5%.
 
 ## XaeroPlus export format
 
