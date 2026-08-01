@@ -117,7 +117,7 @@ class CropWindow(ctk.CTkToplevel):
                      text_color="gray").pack(anchor="w", padx=12, pady=(8, 0))
 
         ctk.CTkLabel(panel, text="数据区", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
-        rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("scale", "输出比例")]
+        rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("pixel_usage", "像素使用比例")]
         self.labels: dict[str, ctk.CTkLabel] = {}
         for i, (key, label) in enumerate(rows):
             ctk.CTkLabel(panel, text=label + ":", anchor="w").pack(anchor="w", padx=12, pady=1)
@@ -155,7 +155,7 @@ class CropWindow(ctk.CTkToplevel):
         self.labels["region"].configure(text=f"{w} × {h}")
         scale = min(1.0, max(0.01, self._scale_getter()))
         self.labels["output"].configure(text=f"{max(1, round(w*scale))} × {max(1, round(h*scale))}")
-        self.labels["scale"].configure(text=f"{scale*100:.1f}%")
+        self.labels["pixel_usage"].configure(text=f"{scale*scale*100:.1f}%")
 
     def _on_aspect(self, name: str) -> None:
         mapping = {"自由": "free", "原比例": "original", "1:1": "1:1", "4:3": "4:3", "16:9": "16:9"}
@@ -290,7 +290,9 @@ class StitcherApp(ctk.CTk):
 
         ctk.CTkLabel(
             section,
-            text="压缩级别:PNG 无损,级别只影响文件大小与保存速度(越高文件越小、越慢),画质不变。一般保持默认。",
+            text="压缩级别(0-9):PNG 为无损格式,不同级别输出的像素完全一致、画质不变。\n"
+                 "级别只影响文件大小与保存耗时:越高文件越小、保存越慢(0 = 最快最大,9 = 最慢最小,默认 6 均衡)。\n"
+                 "一般保持默认即可;追求更小文件选 9,追求更快选 1-3。",
             text_color="gray", anchor="w", justify="left",
         ).pack(fill="x", padx=12, pady=(0, 6))
 
@@ -300,28 +302,47 @@ class StitcherApp(ctk.CTk):
     def _build_data(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
         frame.grid(row=0, column=DATA_COL, sticky="ns", padx=(0, 8))
+        self.stat_labels: dict[str, ctk.CTkLabel] = {}
         ctk.CTkLabel(frame, text="数据区", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4)
+            row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 0)
         )
-        rows = [
-            ("tiles", "分片量(瓦片数)"),
+        row = 1
+        # ---- 原图区
+        ctk.CTkLabel(frame, text="原图区", text_color="gray", font=ctk.CTkFont(size=12)).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 2)
+        )
+        row += 1
+        for key, label in [
             ("input_res", "输入分辨率"),
+            ("tile_res", "单张分辨率"),
+            ("tiles", "分片量"),
             ("grid", "网格"),
             ("holes", "空洞"),
+        ]:
+            self._data_row(frame, row, key, label)
+            row += 1
+        # ---- 输出区
+        ctk.CTkLabel(frame, text="输出区", text_color="gray", font=ctk.CTkFont(size=12)).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 2)
+        )
+        row += 1
+        for key, label in [
             ("output_res", "输出分辨率"),
-            ("scale", "输出比例"),
+            ("pixel_usage", "像素使用比例"),
             ("est_size", "预估文件大小"),
             ("actual_size", "实际文件大小"),
-        ]
-        self.stat_labels: dict[str, ctk.CTkLabel] = {}
-        for i, (key, label) in enumerate(rows, 1):
-            ctk.CTkLabel(frame, text=label + ":", anchor="w").grid(
-                row=i, column=0, sticky="ew", padx=12, pady=2
-            )
-            val = ctk.CTkLabel(frame, text="-", anchor="e")
-            val.grid(row=i, column=1, sticky="e", padx=12)
-            self.stat_labels[key] = val
+        ]:
+            self._data_row(frame, row, key, label)
+            row += 1
         frame.grid_columnconfigure(1, weight=1)
+
+    def _data_row(self, frame, row: int, key: str, label: str) -> None:
+        ctk.CTkLabel(frame, text=label + ":", anchor="w").grid(
+            row=row, column=0, sticky="ew", padx=12, pady=1
+        )
+        val = ctk.CTkLabel(frame, text="-", anchor="e")
+        val.grid(row=row, column=1, sticky="e", padx=12)
+        self.stat_labels[key] = val
 
     def _build_preview(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
@@ -373,6 +394,7 @@ class StitcherApp(ctk.CTk):
     def _load_input(self, d: str) -> None:
         self.btn_run.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
+        self.crop_box = None
         self._set_progress_indet(True, "正在解析瓦片...")
         self._start_worker(self._worker_load, d, int(self.level_var.get()))
 
@@ -440,12 +462,27 @@ class StitcherApp(ctk.CTk):
         self.width_var.set(str(max(1, round(rw * self.scale_var.get()))))
         self._recompute()
         self.status_var.set(f"已应用裁切: {box}")
+        self._refresh_crop_guide()
         self._crop_closed()
 
     def _crop_closed(self) -> None:
         self._crop_window = None
         self.btn_run.configure(state="normal")
         self.btn_crop.configure(state="normal")
+        self._refresh_crop_guide()
+
+    def _refresh_crop_guide(self) -> None:
+        """Show the applied crop as a red dashed box on the preview (or clear it)."""
+        if self.preview_pil is None or self.ts is None:
+            return
+        s = self.preview_pil.width / self.ts.full_width
+        if self.crop_box is not None:
+            left, top, right, bottom = self.crop_box
+            self.crop_overlay.set_guide(
+                (round(left * s), round(top * s), round(right * s), round(bottom * s))
+            )
+        else:
+            self.crop_overlay.set_guide(None)
 
     # --------------------------------------------------------------- run
 
@@ -563,6 +600,7 @@ class StitcherApp(ctk.CTk):
     def _show_preview(self, pil: Image.Image) -> None:
         self.preview_pil = pil
         self.crop_overlay.set_image(pil)
+        self._refresh_crop_guide()
 
     def _refresh_stats(self) -> None:
         ts = self.ts
@@ -570,9 +608,16 @@ class StitcherApp(ctk.CTk):
             return
         self.stat_labels["tiles"].configure(text=str(ts.count))
         self.stat_labels["input_res"].configure(text=f"{ts.full_width} × {ts.full_height}")
+        self.stat_labels["tile_res"].configure(text=f"{ts.tile_size} × {ts.tile_size}")
         self.stat_labels["grid"].configure(text=f"{ts.cols} × {ts.rows}")
         self.stat_labels["holes"].configure(text=str(ts.holes))
         self._recompute()
+
+    @staticmethod
+    def _pixel_usage(out_w: int, out_h: int, region_w: int, region_h: int) -> str:
+        """Output pixel count as a % of the region's original pixel count."""
+        denom = region_w * region_h
+        return f"{out_w * out_h / denom * 100:.1f}%" if denom else "100%"
 
     def _recompute(self) -> None:
         ts = self.ts
@@ -586,7 +631,7 @@ class StitcherApp(ctk.CTk):
             out_w = max(1, round(region_w * scale))
             out_h = max(1, round(region_h * scale))
             self.stat_labels["output_res"].configure(text=f"{out_w} × {out_h}")
-            self.stat_labels["scale"].configure(text=f"{scale*100:.1f}%")
+            self.stat_labels["pixel_usage"].configure(text=self._pixel_usage(out_w, out_h, region_w, region_h))
             if cal is not None:
                 est = cal.estimate_bytes(out_w * out_h, level)
                 self.stat_labels["est_size"].configure(text=f"{self._fmt_bytes(est)} (预估,可能偏大)")
@@ -598,7 +643,7 @@ class StitcherApp(ctk.CTk):
             if not target_text:
                 # unlimited -> original resolution
                 self.stat_labels["output_res"].configure(text=f"{region_w} × {region_h}")
-                self.stat_labels["scale"].configure(text="100%")
+                self.stat_labels["pixel_usage"].configure(text="100%")
                 self.stat_labels["est_size"].configure(text="不限制(原始分辨率)")
                 self.stat_labels["actual_size"].configure(text="-")
                 return
@@ -608,7 +653,7 @@ class StitcherApp(ctk.CTk):
                     raise ValueError
             except ValueError:
                 self.stat_labels["output_res"].configure(text="-")
-                self.stat_labels["scale"].configure(text="-")
+                self.stat_labels["pixel_usage"].configure(text="-")
                 self.stat_labels["est_size"].configure(text="目标大小无效")
                 return
             if cal is not None:
@@ -618,13 +663,15 @@ class StitcherApp(ctk.CTk):
                     out_w = max(1, round(region_w * scale))
                     out_h = max(1, round(region_h * scale))
                     self.stat_labels["output_res"].configure(text=f"{out_w} × {out_h}(预估)")
-                    self.stat_labels["scale"].configure(text=f"{scale*100:.1f}%(预估)")
+                    self.stat_labels["pixel_usage"].configure(
+                        text=self._pixel_usage(out_w, out_h, region_w, region_h) + "(预估)"
+                    )
                     self.stat_labels["est_size"].configure(text=f"目标 {self.target_mb_var.get()} MB")
                 else:
                     self.stat_labels["output_res"].configure(text="-")
             else:
                 self.stat_labels["output_res"].configure(text="-")
-                self.stat_labels["scale"].configure(text="-")
+                self.stat_labels["pixel_usage"].configure(text="-")
             self.stat_labels["actual_size"].configure(text="-")
 
     def _set_progress_indet(self, active: bool, text: str = "") -> None:
@@ -695,9 +742,9 @@ class StitcherApp(ctk.CTk):
         elif t == "stats_actual":
             self.stat_labels["output_res"].configure(text=f"{msg['w']} × {msg['h']}")
             if self.ts is not None:
-                region_w, _ = core.region_size(self.ts, self.crop_box)
-                self.stat_labels["scale"].configure(
-                    text=f"{min(1.0, msg['w']/region_w)*100:.1f}%"
+                region_w, region_h = core.region_size(self.ts, self.crop_box)
+                self.stat_labels["pixel_usage"].configure(
+                    text=self._pixel_usage(msg["w"], msg["h"], region_w, region_h)
                 )
             self.stat_labels["est_size"].configure(text="-")
             self.stat_labels["actual_size"].configure(text=self._fmt_bytes(msg["bytes"]))

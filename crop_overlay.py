@@ -80,6 +80,7 @@ class CropOverlay(tk.Canvas):
         self._ix = self._iy = 0.0
         self._last_canvas = (0, 0)
         self._rect = (0, 0, 0, 0)          # selection in source px
+        self._guide = None                 # dashed crop outline shown in viewer mode
         self._aspect_name = "free"
         self._active = False
         self._drag = None
@@ -140,6 +141,15 @@ class CropOverlay(tk.Canvas):
         self._rect = (0, 0, self._src_w, self._src_h)
         self._redraw()
         self._notify()
+
+    def set_guide(self, rect_src) -> None:
+        """Show a dashed red crop outline in viewer mode (``None`` clears it).
+
+        ``rect_src`` is in source pixels and stays glued to the map under
+        zoom/pan.
+        """
+        self._guide = rect_src
+        self._redraw()
 
     @property
     def is_active(self) -> bool:
@@ -423,6 +433,10 @@ class CropOverlay(tk.Canvas):
         self._ensure_photo()
         self.create_image(int(self._ix), int(self._iy), anchor="nw", image=self._photo)
         if not self._active:
+            if self._guide is not None:
+                x0, y0, x1, y1 = self._guide
+                c = self._to_canvas
+                self.create_rectangle(c(x0, y0), c(x1, y1), outline=SELECT_COLOR, width=2, dash=(6, 3))
             return
         x0, y0, x1, y1 = self._rect
         c = self._to_canvas
