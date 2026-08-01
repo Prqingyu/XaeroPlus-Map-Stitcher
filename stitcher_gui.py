@@ -402,7 +402,7 @@ class StitcherApp(ctk.CTk):
 
     def _cmd_crop(self) -> None:
         if self.ts is None or self.preview_pil is None:
-            messagebox.showwarning(APP_TITLE, "请先加载输入目录并生成预览")
+            messagebox.showwarning(APP_TITLE, "请先加载输入目录")
             return
         if self._crop_window is not None and self._crop_window.winfo_exists():
             self._crop_window.lift()
