@@ -70,6 +70,20 @@ Features:
 
 > **On estimates:** pre-run size estimates are approximate. Large flat regions (e.g. ocean) compress dramatically better at full resolution, so estimates for very large outputs tend to run high. The *by file size* mode does **not** depend on the estimate — it measures the real PNG output and converges to the target within ~5%.
 
+## Building a Windows EXE
+
+A single-file GUI executable can be built with [PyInstaller](https://pyinstaller.org/):
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name "XaeroPlus-Map-Stitcher" \
+    --collect-all customtkinter app.py
+```
+
+The result is `dist/XaeroPlus-Map-Stitcher.exe` (~30 MB). The generated
+`XaeroPlus-Map-Stitcher.spec` is kept in the repo so the build is reproducible.
+The EXE launches the GUI; the CLI remains available via `python stitch.py`.
+
 ## XaeroPlus export format
 
 This tool is written for and verified against **XaeroPlus' map export** (the map image export of XaeroPlus, a.k.a. XaroPlus). Its tiles follow this layout:

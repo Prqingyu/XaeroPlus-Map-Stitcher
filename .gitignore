@@ -10,3 +10,7 @@ env/
 # Stitching outputs
 *_stitched/
 output/
+
+# PyInstaller build artifacts
+build/
+dist/
