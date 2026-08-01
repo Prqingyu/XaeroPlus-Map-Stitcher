@@ -49,8 +49,20 @@ Image.MAX_IMAGE_PIXELS = None  # see stitch_core for why
 
 APP_TITLE = "XaeroPlus Map Stitcher — 分片地图整合工具"
 PREVIEW_TARGET_BYTES = 1_000_000  # ~1 MB overview
-PREVIEW_BOX_W, PREVIEW_BOX_H = 440, 460
 DEFAULT_LEVEL = 6
+
+# ---- layout knobs (adjust these to resize the UI) ---------------------
+# Main window default and minimum size (px). The stitched map is portrait
+# (taller than wide), so increasing WIN_H is what makes the preview bigger.
+WIN_W, WIN_H = 1100, 960
+WIN_MIN_W, WIN_MIN_H = 980, 780
+# Nominal preview canvas size. The preview column expands to fill all
+# leftover horizontal space; the window height controls how tall it gets.
+PREVIEW_BOX_W, PREVIEW_BOX_H = 680, 740
+# The statistics ("数据区") column is fixed-width and never stretches;
+# column weights below give all extra horizontal space to the preview.
+DATA_COL = 0
+PREVIEW_COL = 1
 
 ASPECT_LABELS = ["自由", "原比例", "1:1", "4:3", "16:9"]
 
@@ -167,8 +179,8 @@ class StitcherApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("980x760")
-        self.minsize(900, 700)
+        self.geometry(f"{WIN_W}x{WIN_H}")
+        self.minsize(WIN_MIN_W, WIN_MIN_H)
 
         # ---- state (plain Python objects, safe to read from worker threads)
         self.ts: core.TileSet | None = None
@@ -205,8 +217,11 @@ class StitcherApp(ctk.CTk):
         self._build_params(root)
 
         middle = ctk.CTkFrame(root)
-        middle.pack(fill="both", expand=True, pady=12)
-        middle.grid_columnconfigure(0, weight=1)
+        middle.pack(fill="both", expand=True, pady=(8, 8))
+        # data column takes only what it needs; every extra pixel of width
+        # goes to the preview column (which also stretches vertically).
+        middle.grid_columnconfigure(DATA_COL, weight=0)
+        middle.grid_columnconfigure(PREVIEW_COL, weight=1)
         middle.grid_rowconfigure(0, weight=1)
         self._build_data(middle)
         self._build_preview(middle)
@@ -225,14 +240,11 @@ class StitcherApp(ctk.CTk):
     def _build_params(self, parent) -> None:
         """Output settings block: mode selector first, then its setting, then level."""
         section = ctk.CTkFrame(parent)
-        section.pack(fill="x", pady=(10, 0))
-        ctk.CTkLabel(section, text="输出设置", font=ctk.CTkFont(weight="bold")).pack(
-            anchor="w", padx=10, pady=(8, 0)
-        )
+        section.pack(fill="x", pady=(6, 0))
 
         # ---- mode selector
         modef = ctk.CTkFrame(section, fg_color="transparent")
-        modef.pack(fill="x", padx=10, pady=(6, 0))
+        modef.pack(fill="x", padx=10, pady=(4, 0))
         ctk.CTkLabel(modef, text="输出模式:").pack(side="left")
         ctk.CTkRadioButton(
             modef, text="按分辨率", variable=self.mode_var, value="resolution", command=self._on_mode
@@ -267,7 +279,7 @@ class StitcherApp(ctk.CTk):
 
         # ---- compression level
         compf = ctk.CTkFrame(section, fg_color="transparent")
-        compf.pack(fill="x", padx=10, pady=(0, 8))
+        compf.pack(fill="x", padx=10, pady=(0, 2))
         ctk.CTkLabel(compf, text="压缩级别:").pack(side="left")
         ctk.CTkSlider(
             compf, from_=0, to=9, number_of_steps=9, variable=self.level_var,
@@ -276,12 +288,18 @@ class StitcherApp(ctk.CTk):
         self.level_val = ctk.CTkLabel(compf, text=str(DEFAULT_LEVEL), width=24)
         self.level_val.pack(side="left")
 
-        self.res_frame.pack(fill="x", padx=10, pady=6)
+        ctk.CTkLabel(
+            section,
+            text="压缩级别:PNG 无损,级别只影响文件大小与保存速度(越高文件越小、越慢),画质不变。一般保持默认。",
+            text_color="gray", anchor="w", justify="left",
+        ).pack(fill="x", padx=12, pady=(0, 6))
+
+        self.res_frame.pack(fill="x", padx=10, pady=4)
         self.size_frame.pack_forget()
 
     def _build_data(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
-        frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        frame.grid(row=0, column=DATA_COL, sticky="ns", padx=(0, 8))
         ctk.CTkLabel(frame, text="数据区", font=ctk.CTkFont(weight="bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4)
         )
@@ -307,7 +325,7 @@ class StitcherApp(ctk.CTk):
 
     def _build_preview(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
-        frame.grid(row=0, column=1, sticky="nsew")
+        frame.grid(row=0, column=PREVIEW_COL, sticky="nsew")
         ctk.CTkLabel(frame, text="预览(~1MB 全图概览)", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
