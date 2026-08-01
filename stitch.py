@@ -24,7 +24,6 @@ Example::
 Outputs
 -------
 * ``full_stitched.png``  the complete stitched map
-* ``quad_*.png``         four quadrant crops for easy viewing
 * ``preview.png``        a downscaled overview
 
 Requires Pillow (``pip install -r requirements.txt``).
@@ -83,7 +82,6 @@ def main() -> None:
     )
     ap.add_argument("--tile-size", type=int, default=1024, help="tile edge length in pixels (default: 1024)")
     ap.add_argument("--background", type=parse_background, default=(0, 0, 0), help="colour for holes, 'R,G,B' (default: 0,0,0)")
-    ap.add_argument("--no-quadrants", action="store_true", help="skip the four quadrant crops")
     ap.add_argument("--no-preview", action="store_true", help="skip the downscaled preview")
     ap.add_argument("--preview-scale", type=float, default=PREVIEW_SCALE, help="preview scale factor (default: 0.15)")
     ap.add_argument("--compress-level", type=int, default=6, choices=range(0, 10), help="PNG compression level 0-9 (default: 6)")
@@ -117,7 +115,6 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     written = core.save_outputs(
         canvas, output_dir, args.compress_level,
-        with_quadrants=not args.no_quadrants,
         preview_image=preview,
     )
     for label, path in written.items():

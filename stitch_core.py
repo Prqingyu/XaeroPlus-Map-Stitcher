@@ -336,12 +336,11 @@ def save_outputs(
     canvas: Image.Image,
     output_dir: Path,
     compress_level: int,
-    with_quadrants: bool = True,
     preview_image: Image.Image | None = None,
     progress: Progress | None = None,
     cancel_flag=None,
 ) -> dict[str, Path]:
-    """Save the canvas plus optional quadrants and preview into ``output_dir``.
+    """Save the canvas and an optional preview into ``output_dir``.
 
     Returns a mapping of label -> saved path.
     """
@@ -355,21 +354,6 @@ def save_outputs(
     written["full"] = full
     if progress is not None:
         progress(1, 1, "save")
-
-    if with_quadrants:
-        width, height = canvas.size
-        midx, midy = width // 2, height // 2
-        for name, box in (
-            ("NW", (0, 0, midx, midy)),
-            ("NE", (midx, 0, width, midy)),
-            ("SW", (0, midy, midx, height)),
-            ("SE", (midx, midy, width, height)),
-        ):
-            if cancel_flag is not None and cancel_flag.is_set():
-                raise StitchCancelled()
-            qp = output_dir / f"quad_{name}.png"
-            canvas.crop(box).save(qp, compress_level=compress_level)
-            written[f"quad_{name}"] = qp
 
     if preview_image is not None:
         pvp = output_dir / "preview.png"

@@ -13,12 +13,14 @@ Run::
 Features
 --------
 * Pick a XaeroPlus export directory and an output directory.
-* Two linked output modes:
+* Two linked output modes (the setting sits directly below the mode selector):
   - by resolution  (set output width / scale, size is estimated)
   - by file size   (set a target size in MB, resolution is solved iteratively)
 * PNG compression level 0-9.
 * A statistics area (tile count, grid, resolution, estimated size) and a
   fixed ~1 MB full-map preview.
+* **Cropping** opens a dedicated crop window that combines a large map canvas
+  (photo-editor-style: 9 handles, drag to move/resize) with a data panel.
 * All heavy work runs in a background thread; the UI stays responsive and the
   operation can be cancelled.
 """
@@ -45,6 +47,113 @@ PREVIEW_TARGET_BYTES = 1_000_000  # ~1 MB overview
 PREVIEW_BOX_W, PREVIEW_BOX_H = 440, 460
 DEFAULT_LEVEL = 6
 
+ASPECT_LABELS = ["自由", "原比例", "1:1", "4:3", "16:9"]
+
+
+class CropWindow(ctk.CTkToplevel):
+    """A dedicated crop editor: large map canvas + a data/controls panel."""
+
+    def __init__(self, master, ts, preview_pil, scale_getter, crop_box):
+        super().__init__(master)
+        self.master = master
+        self.ts = ts
+        self._scale_getter = scale_getter
+        self.title("裁切 — XaeroPlus Map Stitcher")
+        self.geometry("1000x760")
+        self.minsize(900, 640)
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+
+        root = ctk.CTkFrame(self)
+        root.pack(fill="both", expand=True, padx=12, pady=12)
+
+        # data + controls panel on the right
+        panel = ctk.CTkFrame(root)
+        panel.pack(side="right", fill="y", padx=(10, 0))
+        self._build_panel(panel)
+
+        # large map canvas on the left
+        self.overlay = CropOverlay(root, 820, 700, on_change=self._on_change)
+        self.overlay.pack(side="left", fill="both", expand=True)
+
+        self.overlay.set_image(preview_pil)
+        if crop_box is not None:
+            s = self._src_scale()
+            left, top, right, bottom = crop_box
+            self.overlay.set_rect((round(left * s), round(top * s), round(right * s), round(bottom * s)))
+        else:
+            self.overlay.reset()
+        self.overlay.set_active(True)
+        self._on_change(None)
+
+    def _build_panel(self, panel: ctk.CTkFrame) -> None:
+        ctk.CTkLabel(panel, text="裁切设置", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(10, 4))
+
+        row = ctk.CTkFrame(panel, fg_color="transparent")
+        row.pack(fill="x", padx=12)
+        ctk.CTkLabel(row, text="宽高比:").pack(side="left")
+        self.aspect_var = tk.StringVar(value="自由")
+        ctk.CTkOptionMenu(
+            row, values=ASPECT_LABELS, variable=self.aspect_var, command=self._on_aspect, width=92,
+        ).pack(side="left", padx=6)
+
+        ctk.CTkLabel(panel, text="数据区", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
+        rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("scale", "输出比例")]
+        self.labels: dict[str, ctk.CTkLabel] = {}
+        for i, (key, label) in enumerate(rows):
+            ctk.CTkLabel(panel, text=label + ":", anchor="w").pack(anchor="w", padx=12, pady=1)
+            val = ctk.CTkLabel(panel, text="-", anchor="e")
+            val.pack(fill="x", padx=12)
+            self.labels[key] = val
+
+        btns = ctk.CTkFrame(panel, fg_color="transparent")
+        btns.pack(fill="x", padx=12, pady=(16, 10))
+        ctk.CTkButton(btns, text="应用", command=self._apply).pack(fill="x", pady=2)
+        ctk.CTkButton(btns, text="重置", command=self._reset).pack(fill="x", pady=2)
+        ctk.CTkButton(btns, text="取消", command=self._cancel, fg_color="gray40", hover_color="gray55").pack(fill="x", pady=2)
+
+    # ------------------------------------------------------------ mapping
+
+    def _src_scale(self) -> float:
+        sw, _ = self.overlay.source_size()
+        return sw / self.ts.full_width if sw else 1.0
+
+    def _map_to_full(self, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        s = self._src_scale()
+        x0, y0, x1, y1 = rect
+        left = max(0, round(x0 / s))
+        top = max(0, round(y0 / s))
+        right = min(self.ts.full_width, round(x1 / s))
+        bottom = min(self.ts.full_height, round(y1 / s))
+        return left, top, right, bottom
+
+    def _on_change(self, _rect) -> None:
+        if not hasattr(self, "labels"):
+            return
+        self.labels["tiles"].configure(text=str(self.ts.count))
+        left, top, right, bottom = self._map_to_full(self.overlay.get_rect())
+        w, h = right - left, bottom - top
+        self.labels["region"].configure(text=f"{w} × {h}")
+        scale = min(1.0, max(0.01, self._scale_getter()))
+        self.labels["output"].configure(text=f"{max(1, round(w*scale))} × {max(1, round(h*scale))}")
+        self.labels["scale"].configure(text=f"{scale*100:.1f}%")
+
+    def _on_aspect(self, name: str) -> None:
+        mapping = {"自由": "free", "原比例": "original", "1:1": "1:1", "4:3": "4:3", "16:9": "16:9"}
+        self.overlay.set_aspect(mapping.get(name, "free"))
+
+    def _reset(self) -> None:
+        self.overlay.reset()
+        self._on_change(None)
+
+    def _apply(self) -> None:
+        box = self._map_to_full(self.overlay.get_rect())
+        self.master._crop_applied(box)
+        self.destroy()
+
+    def _cancel(self) -> None:
+        self.master._crop_closed()
+        self.destroy()
+
 
 class StitcherApp(ctk.CTk):
     def __init__(self) -> None:
@@ -58,8 +167,7 @@ class StitcherApp(ctk.CTk):
         self.cal: core.Calibration | None = None
         self.preview_pil: Image.Image | None = None
         self.crop_box: tuple[int, int, int, int] | None = None
-        self.crop_active = False
-        self._crop_backup: tuple[int, int, int, int] | None = None
+        self._crop_window: CropWindow | None = None
 
         self.queue: queue.Queue = queue.Queue()
         self.cancel_event = threading.Event()
@@ -73,7 +181,6 @@ class StitcherApp(ctk.CTk):
         self.scale_var = tk.DoubleVar(value=1.0)
         self.target_mb_var = tk.StringVar(value="100")
         self.level_var = tk.DoubleVar(value=DEFAULT_LEVEL)
-        self.quad_var = tk.BooleanVar(value=True)
 
         self._build_ui()
         self.after(100, self._poll)
@@ -108,8 +215,16 @@ class StitcherApp(ctk.CTk):
         ctk.CTkButton(frame, text="浏览...", width=76, command=browse_cb).pack(side="left")
 
     def _build_params(self, parent) -> None:
-        modef = ctk.CTkFrame(parent, fg_color="transparent")
-        modef.pack(fill="x", pady=(10, 0))
+        """Output settings block: mode selector first, then its setting, then level."""
+        section = ctk.CTkFrame(parent)
+        section.pack(fill="x", pady=(10, 0))
+        ctk.CTkLabel(section, text="输出设置", font=ctk.CTkFont(weight="bold")).pack(
+            anchor="w", padx=10, pady=(8, 0)
+        )
+
+        # ---- mode selector
+        modef = ctk.CTkFrame(section, fg_color="transparent")
+        modef.pack(fill="x", padx=10, pady=(6, 0))
         ctk.CTkLabel(modef, text="输出模式:").pack(side="left")
         ctk.CTkRadioButton(
             modef, text="按分辨率", variable=self.mode_var, value="resolution", command=self._on_mode
@@ -117,17 +232,9 @@ class StitcherApp(ctk.CTk):
         ctk.CTkRadioButton(
             modef, text="按文件大小", variable=self.mode_var, value="size", command=self._on_mode
         ).pack(side="left", padx=8)
-        ctk.CTkLabel(modef, text="压缩级别:").pack(side="left", padx=(20, 0))
-        ctk.CTkSlider(
-            modef, from_=0, to=9, number_of_steps=9, variable=self.level_var,
-            command=self._on_level, width=140,
-        ).pack(side="left", padx=6)
-        self.level_val = ctk.CTkLabel(modef, text=str(DEFAULT_LEVEL), width=24)
-        self.level_val.pack(side="left")
 
-        # ---- resolution row (hidden in "by file size" mode)
-        self.res_frame = ctk.CTkFrame(parent, fg_color="transparent")
-        self.res_frame.pack(fill="x", pady=8)
+        # ---- resolution setting (shown directly under the mode selector)
+        self.res_frame = ctk.CTkFrame(section, fg_color="transparent")
         ctk.CTkLabel(self.res_frame, text="输出宽度(px):").pack(side="left")
         self.width_entry = ctk.CTkEntry(self.res_frame, textvariable=self.width_var, width=110)
         self.width_entry.pack(side="left", padx=6)
@@ -135,21 +242,34 @@ class StitcherApp(ctk.CTk):
         self.width_entry.bind("<FocusOut>", self._on_width)
         self.scale_slider = ctk.CTkSlider(
             self.res_frame, from_=0.01, to=1.0, number_of_steps=99,
-            variable=self.scale_var, command=self._on_scale, width=240,
+            variable=self.scale_var, command=self._on_scale, width=220,
         )
         self.scale_slider.pack(side="left", padx=10)
         self.res_readout = ctk.CTkLabel(self.res_frame, text="", anchor="e")
         self.res_readout.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
-        # ---- size row (hidden in "by resolution" mode)
-        self.size_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        # ---- size setting (alternate with the resolution one)
+        self.size_frame = ctk.CTkFrame(section, fg_color="transparent")
         ctk.CTkLabel(self.size_frame, text="目标大小(MB):").pack(side="left")
         self.mb_entry = ctk.CTkEntry(self.size_frame, textvariable=self.target_mb_var, width=110)
         self.mb_entry.pack(side="left", padx=6)
         self.mb_entry.bind("<Return>", self._on_mb)
         self.mb_entry.bind("<FocusOut>", self._on_mb)
         ctk.CTkLabel(self.size_frame, text="(分辨率将按目标大小自动求解)").pack(side="left", padx=8)
-        ctk.CTkCheckBox(self.size_frame, text="保存四象限", variable=self.quad_var).pack(side="right", padx=8)
+
+        # ---- compression level
+        compf = ctk.CTkFrame(section, fg_color="transparent")
+        compf.pack(fill="x", padx=10, pady=(0, 8))
+        ctk.CTkLabel(compf, text="压缩级别:").pack(side="left")
+        ctk.CTkSlider(
+            compf, from_=0, to=9, number_of_steps=9, variable=self.level_var,
+            command=self._on_level, width=140,
+        ).pack(side="left", padx=6)
+        self.level_val = ctk.CTkLabel(compf, text=str(DEFAULT_LEVEL), width=24)
+        self.level_val.pack(side="left")
+
+        self.res_frame.pack(fill="x", padx=10, pady=6)
+        self.size_frame.pack_forget()
 
     def _build_data(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
@@ -183,26 +303,8 @@ class StitcherApp(ctk.CTk):
         ctk.CTkLabel(frame, text="预览(~1MB 全图概览)", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
-
-        # crop controls (packed only while crop mode is active)
-        self.crop_bar = ctk.CTkFrame(frame, fg_color="transparent")
-        ctk.CTkLabel(self.crop_bar, text="宽高比:").pack(side="left")
-        self.crop_aspect_var = tk.StringVar(value="自由")
-        self.crop_aspect_menu = ctk.CTkOptionMenu(
-            self.crop_bar, values=["自由", "原比例", "1:1", "4:3", "16:9"],
-            variable=self.crop_aspect_var, command=self._on_crop_aspect, width=92,
-        )
-        self.crop_aspect_menu.pack(side="left", padx=(4, 12))
-        ctk.CTkButton(self.crop_bar, text="应用", width=52, command=self._crop_apply).pack(side="left", padx=2)
-        ctk.CTkButton(self.crop_bar, text="取消", width=52, command=self._crop_cancel,
-                      fg_color="gray40", hover_color="gray55").pack(side="left", padx=2)
-        ctk.CTkButton(self.crop_bar, text="重置", width=52, command=self._crop_reset).pack(side="left", padx=2)
-        self.crop_size_label = ctk.CTkLabel(self.crop_bar, text="", anchor="e")
-        self.crop_size_label.pack(side="left", fill="x", expand=True, padx=(8, 0))
-
-        self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H, on_change=self._on_crop_change)
+        self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H)
         self.crop_overlay.pack(fill="both", expand=True, padx=12, pady=(2, 12))
-        self.crop_bar.pack_forget()  # hidden until the crop button is pressed
 
     def _build_bottom(self, parent) -> None:
         bottom = ctk.CTkFrame(parent)
@@ -251,10 +353,10 @@ class StitcherApp(ctk.CTk):
     def _on_mode(self) -> None:
         if self.mode_var.get() == "resolution":
             self.size_frame.pack_forget()
-            self.res_frame.pack(fill="x", pady=8)
+            self.res_frame.pack(fill="x", padx=10, pady=6)
         else:
             self.res_frame.pack_forget()
-            self.size_frame.pack(fill="x", pady=8)
+            self.size_frame.pack(fill="x", padx=10, pady=6)
         self._recompute()
 
     def _on_scale(self, _value) -> None:
@@ -305,93 +407,32 @@ class StitcherApp(ctk.CTk):
         if self.ts is None or self.preview_pil is None:
             messagebox.showwarning(APP_TITLE, "请先加载输入目录并生成预览")
             return
-        if self.crop_active:
+        if self._crop_window is not None and self._crop_window.winfo_exists():
+            self._crop_window.lift()
+            self._crop_window.focus()
             return
-        self.crop_active = True
-        self._crop_backup = self.crop_box
-        self.crop_overlay.set_image(self.preview_pil)
-        if self.crop_box is not None:
-            self.crop_overlay.set_rect(self._map_to_preview(self.crop_box))
-        else:
-            self.crop_overlay.reset()
-        self.crop_overlay.set_active(True)
-        self.crop_bar.pack(fill="x", padx=12)
-        self.btn_crop.configure(text="裁切中...", state="disabled")
-        self.btn_run.configure(state="disabled")  # must apply/cancel first
-        self._update_crop_size()
+        self.btn_run.configure(state="disabled")
+        self.btn_preview.configure(state="disabled")
+        self.btn_crop.configure(state="disabled")
+        self._crop_window = CropWindow(
+            self, self.ts, self.preview_pil, lambda: self.scale_var.get(), self.crop_box
+        )
 
-    def _crop_apply(self) -> None:
-        if not self.crop_active:
-            return
-        self.crop_box = self._map_to_full(self.crop_overlay.get_rect())
-        self._exit_crop_mode()
+    def _crop_applied(self, box: tuple[int, int, int, int]) -> None:
+        self.crop_box = box
         rw, _ = core.region_size(self.ts, self.crop_box)
         self.width_var.set(str(max(1, round(rw * self.scale_var.get()))))
         self._recompute()
-        self.status_var.set(f"已应用裁切: {self.crop_box}")
+        self.status_var.set(f"已应用裁切: {box}")
+        self._crop_closed()
 
-    def _crop_cancel(self) -> None:
-        if not self.crop_active:
-            return
-        self.crop_box = self._crop_backup
-        self._exit_crop_mode()
-        self._recompute()
-        self.status_var.set("已取消裁切")
-
-    def _crop_reset(self) -> None:
-        if self.crop_active:
-            self.crop_overlay.reset()
-            self._update_crop_size()
-
-    def _exit_crop_mode(self) -> None:
-        self.crop_active = False
-        self.crop_overlay.set_active(False)
-        self.crop_bar.pack_forget()
-        self.btn_crop.configure(text="裁切", state="normal")
+    def _crop_closed(self) -> None:
+        self._crop_window = None
         self.btn_run.configure(state="normal")
+        self.btn_preview.configure(state="normal")
+        self.btn_crop.configure(state="normal")
 
-    def _on_crop_aspect(self, name: str) -> None:
-        mapping = {"自由": "free", "原比例": "original", "1:1": "1:1", "4:3": "4:3", "16:9": "16:9"}
-        self.crop_overlay.set_aspect(mapping.get(name, "free"))
-
-    def _on_crop_change(self, _rect) -> None:
-        if self.crop_active:
-            self._update_crop_size()
-
-    def _update_crop_size(self) -> None:
-        if not self.crop_active or self.ts is None:
-            return
-        left, top, right, bottom = self._map_to_full(self.crop_overlay.get_rect())
-        w, h = right - left, bottom - top
-        if self.mode_var.get() == "resolution":
-            scale = min(1.0, max(0.01, self.scale_var.get()))
-        else:
-            scale = 1.0
-        out_w, out_h = max(1, round(w * scale)), max(1, round(h * scale))
-        self.crop_size_label.configure(text=f"选区 {w}×{h} → 输出 {out_w}×{out_h}")
-
-    def _preview_scale(self) -> float:
-        """Map-scale from the overlay's *displayed* image pixels to map pixels."""
-        if self.ts is None:
-            return 1.0
-        img_w, _ = self.crop_overlay.image_size()
-        if img_w > 0:
-            return img_w / self.ts.full_width
-        return 1.0
-
-    def _map_to_preview(self, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-        s = self._preview_scale()
-        left, top, right, bottom = box
-        return round(left * s), round(top * s), round(right * s), round(bottom * s)
-
-    def _map_to_full(self, rect: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-        s = self._preview_scale()
-        x0, y0, x1, y1 = rect
-        left = max(0, round(x0 / s))
-        top = max(0, round(y0 / s))
-        right = min(self.ts.full_width, round(x1 / s))
-        bottom = min(self.ts.full_height, round(y1 / s))
-        return left, top, right, bottom
+    # --------------------------------------------------------------- run
 
     def _cmd_run(self) -> None:
         if self.ts is None or not self.input_var.get():
@@ -421,7 +462,7 @@ class StitcherApp(ctk.CTk):
         self._set_progress_indet(False)
         self._start_worker(
             self._worker_run, Path(self.input_var.get()), Path(out),
-            int(self.level_var.get()), bool(self.quad_var.get()), target,
+            int(self.level_var.get()), target,
         )
 
     def _cmd_cancel(self) -> None:
@@ -451,7 +492,7 @@ class StitcherApp(ctk.CTk):
         self._emit({"type": "status", "text": "预览已生成"})
         self._emit({"type": "done"})
 
-    def _worker_run(self, input_dir: Path, output_dir: Path, level: int, with_quadrants: bool, target) -> None:
+    def _worker_run(self, input_dir: Path, output_dir: Path, level: int, target) -> None:
         ts = self.ts
         crop_box = self.crop_box  # snapshot at start
         prog = core.Progress(lambda c, t, s: self._emit_progress(c, t, s))
@@ -475,7 +516,6 @@ class StitcherApp(ctk.CTk):
             self._emit({"type": "status", "text": "正在保存输出..."})
             written = core.save_outputs(
                 canvas, output_dir, level,
-                with_quadrants=with_quadrants,
                 preview_image=self.preview_pil,
                 cancel_flag=self.cancel_event,
             )

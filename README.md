@@ -6,7 +6,7 @@
 
 [XaeroPlus](https://github.com/rfresh2/XaeroPlus) (often written "XaroPlus") is a third-party add-on for [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map), created by [rfresh2](https://github.com/rfresh2) and **not affiliated with** the original mod author xaero96. When you export a world from XaeroPlus' world map, it writes the explored region as a directory of equal-sized PNG tiles.
 
-This tool takes that directory and reconstructs the full map: it lays the tiles out on a grid read from their filenames, paints any missing cells with a background colour, and writes the result as a single PNG — plus four quadrant crops and a small preview for quick viewing.
+This tool takes that directory and reconstructs the full map: it lays the tiles out on a grid read from their filenames, paints any missing cells with a background colour, and writes the result as a single PNG — plus a small preview for quick viewing.
 
 ## Requirements
 
@@ -42,7 +42,6 @@ By default the output is written to `<input_dir>_stitched/`; use `-o` to choose 
 | `-o, --output` | Output directory | `<input_dir>_stitched` |
 | `--tile-size` | Edge length of one tile, in pixels | `1024` |
 | `--background` | Colour for missing cells, as `R,G,B` | `0,0,0` |
-| `--no-quadrants` | Skip the four quadrant crops | `False` |
 | `--no-preview` | Skip the downscaled preview | `False` |
 | `--preview-scale` | Preview scale factor | `0.15` |
 | `--compress-level` | PNG compression level, `0`–`9` | `6` |
@@ -66,7 +65,7 @@ Features:
 - **Compression level** 0–9.
 - **Statistics area** — tile count, input resolution, grid & holes, output resolution, estimated size.
 - **Preview box** — a fixed ~1 MB full-map overview, generated automatically after loading the input.
-- **Interactive cropping** — press **裁切** to enter a photo-editor-style crop mode: drag corners/edges to resize, drag inside to move, drag outside to start a new selection, with aspect-ratio presets (自由 / original / 1:1 / 4:3 / 16:9). The crop limits the stitched output region and the statistics update live. The same region can be set from the CLI with `--crop`.
+- **Interactive cropping** — press **裁切** to open a dedicated crop window that combines a large map canvas with a data panel. The map canvas is photo-editor-style: **9 handles** (4 corners, 4 edge mid-points, and a centre point) to resize the border, drag inside the selection to move it, drag outside to start a new selection, and aspect-ratio presets (自由 / original / 1:1 / 4:3 / 16:9). The crop limits the stitched output region and the statistics update live. The same region can be set from the CLI with `--crop`.
 - Background-thread stitching with a progress bar and a **Cancel** button.
 
 > **On estimates:** pre-run size estimates are approximate. Large flat regions (e.g. ocean) compress dramatically better at full resolution, so estimates for very large outputs tend to run high. The *by file size* mode does **not** depend on the estimate — it measures the real PNG output and converges to the target within ~5%.
@@ -105,7 +104,6 @@ Sample filenames from the development dataset:
 | File | Description |
 |---|---|
 | `full_stitched.png` | The complete stitched map |
-| `quad_NW.png` / `quad_NE.png` / `quad_SW.png` / `quad_SE.png` | Four quadrant crops for easy viewing |
 | `preview.png` | A downscaled overview |
 
 ## Performance notes
