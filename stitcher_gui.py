@@ -232,20 +232,25 @@ class StitcherApp(ctk.CTk):
         root = ctk.CTkFrame(self)
         root.pack(fill="both", expand=True, padx=14, pady=14)
 
-        # hints before the path selection
+        # ---- 文件路径 section (first box)
+        path_sec = ctk.CTkFrame(root)
+        path_sec.pack(fill="x", pady=(0, 6))
+        ctk.CTkLabel(path_sec, text="文件路径", font=ctk.CTkFont(size=H1_SIZE, weight="bold")).pack(
+            anchor="w", padx=12, pady=(8, 2)
+        )
         self.path_hint = ctk.CTkLabel(
-            root, text="① 选择导出分片地图所处的文件夹位置(包含瓦片 PNG 的目录):",
+            path_sec, text="选择导出分片地图所处的文件夹位置(包含XaeroPlus导出的 PNG 的目录):",
             anchor="w", text_color="gray", justify="left",
         )
-        self.path_hint.pack(fill="x", padx=12, pady=(0, 0))
+        self.path_hint.pack(fill="x", padx=10, pady=(0, 0))
         self.path_ref = ctk.CTkLabel(
-            root, text="一般位于 .minecraft\\versions\\<版本目录>\\map exports\\<导出时间戳>\\ 下",
+            path_sec, text="一般位于 .minecraft\\versions\\<版本目录>\\map exports\\<导出时间戳>\\ 下",
             anchor="w", text_color="gray", justify="left",
         )
-        self.path_ref.pack(fill="x", padx=12, pady=(0, 6))
+        self.path_ref.pack(fill="x", padx=10, pady=(0, 4))
 
-        self._add_path_row(root, 0, "输入目录", self.input_var, self._pick_input)
-        self._add_path_row(root, 1, "输出目录", self.output_var, self._pick_output)
+        self._add_path_row(path_sec, 0, "输入目录", self.input_var, self._pick_input)
+        self._add_path_row(path_sec, 1, "输出目录", self.output_var, self._pick_output)
 
         self._build_params(root)
 
