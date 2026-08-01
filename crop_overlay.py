@@ -399,11 +399,13 @@ class CropOverlay(tk.Canvas):
         self._clamp_rect()
 
     def _update_cursor(self, name: str) -> None:
+        # X11 names like "nw_resize" are invalid on Windows Tk and raise
+        # TclError mid-drag; use the portable resize cursor names instead.
         cursors = {
-            "nw": "nw_resize", "se": "nw_resize",
-            "ne": "ne_resize", "sw": "ne_resize",
-            "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
-            "w": "sb_h_double_arrow", "e": "sb_h_double_arrow",
+            "nw": "size_nw_se", "se": "size_nw_se",
+            "ne": "size_ne_sw", "sw": "size_ne_sw",
+            "n": "size_ns", "s": "size_ns",
+            "w": "size_we", "e": "size_we",
         }
         self.configure(cursor=cursors.get(name, "crosshair"))
 

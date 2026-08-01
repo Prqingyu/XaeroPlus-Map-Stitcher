@@ -389,6 +389,9 @@ class StitcherApp(ctk.CTk):
         d = filedialog.askdirectory(title="选择 XaeroPlus 导出瓦片目录")
         if not d:
             return
+        # tkinter's dialog returns forward slashes; normalize to the native
+        # backslash form so both fields display the same direction.
+        d = str(Path(d))
         self.input_var.set(d)
         src = Path(d)
         self.output_var.set(str(Path(str(src) + "_stitched")))  # sibling folder
@@ -397,7 +400,7 @@ class StitcherApp(ctk.CTk):
     def _pick_output(self) -> None:
         d = filedialog.askdirectory(title="选择输出目录(将在该位置创建文件夹)")
         if d:
-            self.output_var.set(d)
+            self.output_var.set(str(Path(d)))
 
     def _load_input(self, d: str) -> None:
         self.btn_run.configure(state="disabled")
