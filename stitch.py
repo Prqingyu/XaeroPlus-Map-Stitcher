@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HBNS Map Stitcher — stitch XaeroPlus (XaroPlus) map-export tiles into one image.
+"""XaeroPlus Map Stitcher — stitch XaeroPlus (XaroPlus) map-export tiles into one image.
 
 This tool is written for and verified against the map export of XaeroPlus
 (https://github.com/rfresh2/XaeroPlus), a third-party add-on for Xaero's World

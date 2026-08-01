@@ -1,6 +1,8 @@
-# HBNS Map Stitcher
+# XaeroPlus Map Stitcher
 
-> A command-line tool for **XaeroPlus (XaroPlus) map exports** — stitch its tile output into one large image.
+> **XaeroPlus 分片地图整合工具** — 将 XaeroPlus(XaroPlus)导出的分片地图瓦片拼接成一张大图。
+>
+> A command-line tool that stitches **XaeroPlus (XaroPlus) map exports** into one large image.
 
 [XaeroPlus](https://github.com/rfresh2/XaeroPlus) (often written "XaroPlus") is a third-party add-on for [Xaero's World Map](https://www.curseforge.com/minecraft/mc-mods/xaeros-world-map), created by [rfresh2](https://github.com/rfresh2) and **not affiliated with** the original mod author xaero96. When you export a world from XaeroPlus' world map, it writes the explored region as a directory of equal-sized PNG tiles.
 
@@ -88,4 +90,4 @@ A 19×24 grid of 1024×1024 tiles (≈478 megapixels) stitches in roughly 40 sec
 
 ## License
 
-[MIT](LICENSE) © 2026 HBNS_RS contributors
+[MIT](LICENSE) © 2026 XaeroPlus Map Stitcher contributors
