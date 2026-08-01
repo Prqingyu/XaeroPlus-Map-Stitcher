@@ -430,6 +430,7 @@ class StitcherApp(ctk.CTk):
         self.btn_run.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
         self.crop_box = None
+        self.crop_overlay.set_placeholder("解析中...")
         self._set_progress_indet(True, "正在解析瓦片...")
         self._start_worker(self._worker_load, d, int(self.level_var.get()))
 
@@ -837,6 +838,8 @@ class StitcherApp(ctk.CTk):
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             self.status_var.set("处理失败:" + msg["text"][:40])
+            if self.preview_pil is None:
+                self.crop_overlay.set_placeholder("解析失败")
             messagebox.showerror(APP_TITLE, msg["text"])
 
 

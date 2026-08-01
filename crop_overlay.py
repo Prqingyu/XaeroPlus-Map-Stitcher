@@ -81,6 +81,7 @@ class CropOverlay(tk.Canvas):
         self._last_canvas = (0, 0)
         self._rect = (0, 0, 0, 0)          # selection in source px
         self._guide = None                 # dashed crop outline shown in viewer mode
+        self._placeholder: str | None = None   # shown centred while no image is set
         self._aspect_name = "free"
         self._active = False
         self._drag = None
@@ -99,6 +100,7 @@ class CropOverlay(tk.Canvas):
 
     def set_image(self, pil: Image.Image) -> None:
         """Display ``pil`` (source coords) fit-to-canvas, reset selection & view."""
+        self._placeholder = None
         self._src = pil
         self._src_w, self._src_h = pil.size
         self._photo = None
@@ -149,6 +151,11 @@ class CropOverlay(tk.Canvas):
         zoom/pan.
         """
         self._guide = rect_src
+        self._redraw()
+
+    def set_placeholder(self, text: str | None) -> None:
+        """Show centred placeholder text while no image is displayed (``None`` clears)."""
+        self._placeholder = text
         self._redraw()
 
     @property
@@ -431,6 +438,12 @@ class CropOverlay(tk.Canvas):
     def _redraw(self) -> None:
         self.delete("all")
         if self._src is None:
+            if self._placeholder:
+                cx, cy = self.winfo_width(), self.winfo_height()
+                if cx <= 1 or cy <= 1:
+                    cx, cy = self._box
+                self.create_text(cx / 2, cy / 2, text=self._placeholder,
+                                 fill="#8a8a8a", font=("Segoe UI", 13))
             return
         self._ensure_photo()
         self.create_image(int(self._ix), int(self._iy), anchor="nw", image=self._photo)
