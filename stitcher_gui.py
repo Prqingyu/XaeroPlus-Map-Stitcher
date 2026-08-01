@@ -116,7 +116,7 @@ class CropWindow(ctk.CTkToplevel):
         ctk.CTkLabel(panel, text="滚轮:缩放 · 中键拖动:平移\n左键:拖动 9 个手柄调整裁切", justify="left",
                      text_color="gray").pack(anchor="w", padx=12, pady=(8, 0))
 
-        ctk.CTkLabel(panel, text="数据区", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
+        ctk.CTkLabel(panel, text="数据", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=12, pady=(14, 2))
         rows = [("tiles", "分片量(瓦片数)"), ("region", "选区(地图px)"), ("output", "输出分辨率"), ("pixel_usage", "像素使用比例")]
         self.labels: dict[str, ctk.CTkLabel] = {}
         for i, (key, label) in enumerate(rows):
@@ -275,7 +275,7 @@ class StitcherApp(ctk.CTk):
         self.mb_entry.pack(side="left", padx=6)
         self.mb_entry.bind("<Return>", self._on_mb)
         self.mb_entry.bind("<FocusOut>", self._on_mb)
-        self.orig_size_label = ctk.CTkLabel(self.size_frame, text="", text_color="gray")
+        self.orig_size_label = ctk.CTkLabel(self.size_frame, text="")
         self.orig_size_label.pack(side="left", padx=(4, 8))
         ctk.CTkLabel(self.size_frame, text="(留空 = 不限制,按原始分辨率)").pack(side="left")
 
@@ -293,8 +293,7 @@ class StitcherApp(ctk.CTk):
         ctk.CTkLabel(
             section,
             text="压缩级别(0-9):PNG 为无损格式,不同级别输出的像素完全一致、画质不变。\n"
-                 "级别只影响文件大小与保存耗时:越高文件越小、保存越慢(0 = 最快最大,9 = 最慢最小,默认 6 均衡)。\n"
-                 "一般保持默认即可;追求更小文件选 9,追求更快选 1-3。",
+                 "级别只影响文件大小与保存耗时:越高文件越小、保存越慢(0 = 最快最大,9 = 最慢最小,默认 6 均衡)。",
             text_color="gray", anchor="w", justify="left",
         ).pack(fill="x", padx=12, pady=(0, 6))
 
@@ -305,12 +304,12 @@ class StitcherApp(ctk.CTk):
         frame = ctk.CTkFrame(parent)
         frame.grid(row=0, column=DATA_COL, sticky="ns", padx=(0, 8))
         self.stat_labels: dict[str, ctk.CTkLabel] = {}
-        ctk.CTkLabel(frame, text="数据区", font=ctk.CTkFont(weight="bold")).grid(
+        ctk.CTkLabel(frame, text="数据", font=ctk.CTkFont(weight="bold")).grid(
             row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 0)
         )
         row = 1
-        # ---- 原图区
-        ctk.CTkLabel(frame, text="原图区", text_color=("#1a6fb5", "#8ec9f0"),
+        # ---- 原图
+        ctk.CTkLabel(frame, text="原图", text_color=("#1a6fb5", "#8ec9f0"),
                      font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(8, 2)
         )
@@ -324,8 +323,8 @@ class StitcherApp(ctk.CTk):
         ]:
             self._data_row(frame, row, key, label)
             row += 1
-        # ---- 输出区
-        ctk.CTkLabel(frame, text="输出区", text_color=("#1a6fb5", "#8ec9f0"),
+        # ---- 输出
+        ctk.CTkLabel(frame, text="输出", text_color=("#1a6fb5", "#8ec9f0"),
                      font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=row, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 2)
         )
@@ -351,7 +350,7 @@ class StitcherApp(ctk.CTk):
     def _build_preview(self, parent) -> None:
         frame = ctk.CTkFrame(parent)
         frame.grid(row=0, column=PREVIEW_COL, sticky="nsew")
-        ctk.CTkLabel(frame, text="预览(~1MB 全图概览)", font=ctk.CTkFont(weight="bold")).pack(
+        ctk.CTkLabel(frame, text="预览", font=ctk.CTkFont(weight="bold")).pack(
             anchor="w", padx=12, pady=(10, 4)
         )
         self.crop_overlay = CropOverlay(frame, PREVIEW_BOX_W, PREVIEW_BOX_H)
