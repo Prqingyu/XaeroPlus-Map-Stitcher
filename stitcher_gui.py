@@ -33,6 +33,7 @@ Features
 from __future__ import annotations
 
 import math
+import os
 import queue
 import threading
 import tkinter as tk
@@ -215,6 +216,18 @@ class StitcherApp(ctk.CTk):
     def _build_ui(self) -> None:
         root = ctk.CTkFrame(self)
         root.pack(fill="both", expand=True, padx=14, pady=14)
+
+        # hints before the path selection
+        self.path_hint = ctk.CTkLabel(
+            root, text="① 选择导出分片地图所处的文件夹位置(包含瓦片 PNG 的目录):",
+            anchor="w", text_color="gray", justify="left",
+        )
+        self.path_hint.pack(fill="x", padx=12, pady=(0, 0))
+        self.path_ref = ctk.CTkLabel(
+            root, text="一般位于 .minecraft\\versions\\<版本目录>\\map exports\\<导出时间戳>\\ 下",
+            anchor="w", text_color="gray", justify="left",
+        )
+        self.path_ref.pack(fill="x", padx=12, pady=(0, 6))
 
         self._add_path_row(root, 0, "输入目录", self.input_var, self._pick_input)
         self._add_path_row(root, 1, "输出目录", self.output_var, self._pick_output)
@@ -590,7 +603,7 @@ class StitcherApp(ctk.CTk):
             ]
             for _label, p in written.items():
                 lines.append(f"  {p.name}: {self._fmt_bytes(p.stat().st_size)}")
-            self._emit({"type": "result", "text": "\n".join(lines)})
+            self._emit({"type": "result", "text": "\n".join(lines), "output_dir": str(output_dir)})
         except core.StitchCancelled:
             self._emit({"type": "status", "text": "已取消"})
             self._emit({"type": "done"})
@@ -795,6 +808,13 @@ class StitcherApp(ctk.CTk):
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             messagebox.showinfo(APP_TITLE, msg["text"])
+            # auto-open the output folder in the file explorer after success
+            out_dir = msg.get("output_dir")
+            if out_dir and os.path.isdir(out_dir):
+                try:
+                    os.startfile(out_dir)  # Windows only
+                except OSError:
+                    pass
         elif t == "done":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
