@@ -543,32 +543,38 @@ class StitcherApp(ctk.CTk):
     def _worker_run(self, input_dir: Path, output_dir: Path, level: int, target) -> None:
         ts = self.ts
         crop_box = self.crop_box  # snapshot at start
-        prog = core.Progress(lambda c, t, s: self._emit_progress(c, t, s))
         try:
             if target[0] == "resolution":
                 scale = target[1]
+                prog = core.Progress(lambda c, t, s: self._emit_progress(c, t, s))
                 self._emit({"type": "status", "text": f"正在构建画布(比例 {scale*100:.1f}%)..."})
                 canvas = core.build_canvas(ts, input_dir, scale, (0, 0, 0), progress=prog,
                                            cancel_flag=self.cancel_event, crop_box=crop_box)
+                # encode is one blocking call with no fine-grained progress -> animate
                 self._emit({"type": "status", "text": "正在编码输出..."})
+                self._emit({"type": "progress_indet", "active": True})
                 actual = core.encode_png_size(canvas, level)
+                self._emit({"type": "progress_indet", "active": False, "fraction": 0.90})
             else:
                 self._emit({"type": "status", "text": "正在求解目标文件大小..."})
+                self._emit({"type": "progress_indet", "active": True})
                 _scale, canvas, actual = core.solve_scale_for_size(
                     ts, input_dir, target[1] * 1048576, level, (0, 0, 0),
-                    progress=prog, cancel_flag=self.cancel_event,
+                    progress=None, cancel_flag=self.cancel_event,
                     calibration=self.cal, crop_box=crop_box,
                 )
+                self._emit({"type": "progress_indet", "active": False, "fraction": 0.90})
             out_w, out_h = canvas.size
-            self._emit({"type": "progress", "fraction": 0.95})
             self._emit({"type": "status", "text": "正在保存输出..."})
+            self._emit({"type": "progress_indet", "active": True})
             written = core.save_outputs(
                 canvas, output_dir, level,
                 preview_image=self.preview_pil,
                 cancel_flag=self.cancel_event,
             )
-            self._emit({"type": "progress", "fraction": 1.0})
+            self._emit({"type": "progress_indet", "active": False, "fraction": 1.0})
             self._emit({"type": "stats_actual", "w": out_w, "h": out_h, "bytes": actual})
+            self._emit({"type": "status", "text": f"完成:{out_w} × {out_h} · {self._fmt_bytes(actual)}"})
             lines = [
                 f"拼接完成: {out_w} × {out_h}",
                 f"实际文件大小: {self._fmt_bytes(actual)}",
@@ -763,8 +769,20 @@ class StitcherApp(ctk.CTk):
             self.status_var.set(msg["text"])
         elif t == "progress":
             self.progress.set(msg["fraction"])
+        elif t == "progress_indet":
+            # animate blocking phases (encode / solve / save) that can't report
+            # fine-grained progress; restore the fraction when the phase ends.
+            if msg.get("active"):
+                self.progress.configure(mode="indeterminate")
+                self.progress.start()
+            else:
+                self.progress.stop()
+                self.progress.configure(mode="determinate")
+                self.progress.set(msg.get("fraction", 0))
         elif t == "result":
-            self._set_progress_indet(False)
+            # keep the bar at its final fraction (1.0) instead of resetting to 0
+            self.progress.stop()
+            self.progress.configure(mode="determinate")
             self.btn_run.configure(state="normal")
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
@@ -779,6 +797,7 @@ class StitcherApp(ctk.CTk):
             self.btn_run.configure(state="normal")
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
+            self.status_var.set("处理失败:" + msg["text"][:40])
             messagebox.showerror(APP_TITLE, msg["text"])
 
 
