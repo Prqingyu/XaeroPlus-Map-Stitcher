@@ -326,8 +326,6 @@ class StitcherApp(ctk.CTk):
         ctk.CTkLabel(bottom, textvariable=self.status_var, anchor="w").pack(fill="x", padx=12)
         btns = ctk.CTkFrame(bottom, fg_color="transparent")
         btns.pack(fill="x", padx=10, pady=8)
-        self.btn_preview = ctk.CTkButton(btns, text="生成预览", command=self._cmd_preview)
-        self.btn_preview.pack(side="left", padx=(0, 8))
         self.btn_crop = ctk.CTkButton(btns, text="裁切", command=self._cmd_crop)
         self.btn_crop.pack(side="left", padx=(0, 8))
         self.btn_run = ctk.CTkButton(btns, text="开始拼接", command=self._cmd_run, state="disabled")
@@ -356,7 +354,6 @@ class StitcherApp(ctk.CTk):
 
     def _load_input(self, d: str) -> None:
         self.btn_run.configure(state="disabled")
-        self.btn_preview.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
         self._set_progress_indet(True, "正在解析瓦片...")
         self._start_worker(self._worker_load, d, int(self.level_var.get()))
@@ -401,17 +398,6 @@ class StitcherApp(ctk.CTk):
             self.cal = core.Calibration(self.cal.ts, lvl, pts)
         self._recompute()
 
-    def _cmd_preview(self) -> None:
-        if self.ts is None:
-            messagebox.showwarning(APP_TITLE, "请先选择输入目录")
-            return
-        self.btn_preview.configure(state="disabled")
-        self.btn_crop.configure(state="disabled")
-        self._set_progress_indet(True, "正在生成预览...")
-        self._start_worker(
-            self._worker_preview, Path(self.input_var.get()), int(self.level_var.get())
-        )
-
     # ------------------------------------------------------------- cropping
 
     def _cmd_crop(self) -> None:
@@ -423,7 +409,6 @@ class StitcherApp(ctk.CTk):
             self._crop_window.focus()
             return
         self.btn_run.configure(state="disabled")
-        self.btn_preview.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
         self._crop_window = CropWindow(
             self, self.ts, self.preview_pil,
@@ -442,7 +427,6 @@ class StitcherApp(ctk.CTk):
     def _crop_closed(self) -> None:
         self._crop_window = None
         self.btn_run.configure(state="normal")
-        self.btn_preview.configure(state="normal")
         self.btn_crop.configure(state="normal")
 
     # --------------------------------------------------------------- run
@@ -472,7 +456,6 @@ class StitcherApp(ctk.CTk):
             target = ("resolution", min(1.0, self.scale_var.get()))
 
         self.btn_run.configure(state="disabled")
-        self.btn_preview.configure(state="disabled")
         self.btn_crop.configure(state="disabled")
         self.btn_cancel.configure(state="normal")
         self.cancel_event.clear()
@@ -497,16 +480,6 @@ class StitcherApp(ctk.CTk):
         preview = self._build_preview_image(ts, input_dir, cal, level)
         self._emit({"type": "preview", "image": preview})
         self._emit({"type": "status", "text": "就绪"})
-        self._emit({"type": "done"})
-
-    def _worker_preview(self, input_dir: Path, level: int) -> None:
-        cal = self.cal
-        if cal is None or cal.level != level:
-            cal = core.build_calibration(self.ts, input_dir, level, (0, 0, 0))
-            self._emit({"type": "cal", "cal": cal})
-        preview = self._build_preview_image(self.ts, input_dir, cal, level)
-        self._emit({"type": "preview", "image": preview})
-        self._emit({"type": "status", "text": "预览已生成"})
         self._emit({"type": "done"})
 
     def _worker_run(self, input_dir: Path, output_dir: Path, level: int, target) -> None:
@@ -717,20 +690,17 @@ class StitcherApp(ctk.CTk):
         elif t == "result":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
-            self.btn_preview.configure(state="normal")
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             messagebox.showinfo(APP_TITLE, msg["text"])
         elif t == "done":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
-            self.btn_preview.configure(state="normal")
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
         elif t == "error":
             self._set_progress_indet(False)
             self.btn_run.configure(state="normal")
-            self.btn_preview.configure(state="normal")
             self.btn_crop.configure(state="normal")
             self.btn_cancel.configure(state="disabled")
             messagebox.showerror(APP_TITLE, msg["text"])

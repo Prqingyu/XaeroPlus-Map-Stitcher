@@ -149,6 +149,10 @@ class CropOverlay(tk.Canvas):
         """Size of the source image in source pixels (used to map to the map)."""
         return self._src_w, self._src_h
 
+    def _notify(self) -> None:
+        if self._on_change is not None:
+            self._on_change(self.get_rect())
+
     # ------------------------------------------------------- view / zoom / pan
 
     def _set_view(self, canvas_w: int, canvas_h: int) -> None:
