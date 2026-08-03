@@ -12,13 +12,21 @@ This tool takes that directory and reconstructs the full map: it lays the tiles 
 
 - Python 3.9+
 - [Pillow](https://python-pillow.org)
+- [CustomTkinter](https://customtkinter.github.io/) (GUI only)
 
 ## Installation
 
+Clone the repository and install the dependencies for what you need:
+
 ```bash
-git clone <your-repo-url> HBNS_RS
-cd HBNS_RS
+git clone https://github.com/Prqingyu/XaeroPlus-Map-Stitcher.git
+cd XaeroPlus-Map-Stitcher
+
+# CLI only (Pillow)
 pip install -r requirements.txt
+
+# GUI (adds CustomTkinter)
+pip install -r requirements-gui.txt
 ```
 
 ## Usage
@@ -47,12 +55,26 @@ By default the output is written to `<input_dir>_stitched/`; use `-o` to choose 
 | `--compress-level` | PNG compression level, `0`–`9` | `6` |
 | `--crop` | Crop the output to `left,top,right,bottom` (full-resolution map pixels) | `None` |
 
-## GUI
+## Minimal version (`stitch_simple.py`)
 
-A graphical front-end built with [CustomTkinter](https://customtkinter.github.io/):
+Just want the core stitch — no GUI, no size/resolution controls, always at the
+original resolution? Use the single-file [`stitch_simple.py`](stitch_simple.py),
+which depends only on Pillow:
 
 ```bash
-pip install -r requirements-gui.txt
+pip install Pillow
+python stitch_simple.py <input_dir> [-o <output_dir>]
+```
+
+It reads the same XaeroPlus tile directory, builds the full-resolution canvas,
+and writes `full_stitched.png` plus a small `preview.png`.
+
+## GUI
+
+A graphical front-end built with [CustomTkinter](https://customtkinter.github.io/).
+After `pip install -r requirements-gui.txt`, run:
+
+```bash
 python stitcher_gui.py
 ```
 
